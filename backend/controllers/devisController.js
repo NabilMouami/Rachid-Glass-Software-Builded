@@ -1,4 +1,13 @@
-const { Devis, DevisItem, Client, Produit, Facture, FactureItem, BonLivraison, BonLivraisonProduit } = require("../models");
+const {
+  Devis,
+  DevisItem,
+  Client,
+  Produit,
+  Facture,
+  FactureItem,
+  BonLivraison,
+  BonLivraisonProduit,
+} = require("../models");
 const { Op } = require("sequelize");
 
 const PDFDocument = require("pdfkit");
@@ -466,6 +475,7 @@ const updateDevis = async (req, res) => {
 };
 
 const updateDevisStatus = async (req, res) => {
+  console.log("Status Devis: " + req.body.status);
   try {
     const devis = await Devis.findByPk(req.params.id);
     if (!devis) return res.status(404).json({ message: "Devis not found" });
@@ -782,8 +792,47 @@ const convertDevisToInvoice = async (req, res) => {
     }
 
     if (devis.convertedToInvoice) {
-      return res.status(400).json({ message: "Devis already converted to invoice" });
+      return res
+        .status(400)
+        .json({ message: "Devis already converted to invoice" });
     }
+
+    // Skip surface check for now - can be enabled later
+    /*
+    // Check if products have enough surface available
+    console.log("🔍 Vérification des surfaces disponibles...");
+    for (const ligne of devis.lignes) {
+      if (!ligne.produit_id) continue;
+
+      const produit = await Produit.findByPk(ligne.produit_id);
+      if (!produit) continue;
+
+      // Calculate required surface in m²
+      const l1Value = parseFloat(ligne.v1) || 1;
+      const l2Value = parseFloat(ligne.v2) || 1;
+      const quantite = parseFloat(ligne.quantite) || 1;
+
+      const surfaceMM2ParUnite = Math.round(l1Value * l2Value);
+      const surfaceMM2Totale = surfaceMM2ParUnite * quantite;
+      const surfaceM2Totale = surfaceMM2Totale / 10000;
+
+      console.log(`📐 Produit ${produit.reference}:`, {
+        L1_mm: l1Value,
+        L2_mm: l2Value,
+        quantite: quantite,
+        surface_necessaire_m2: surfaceM2Totale.toFixed(6),
+        surface_disponible_m2: parseFloat(produit.surface).toFixed(4),
+      });
+
+      if (parseFloat(produit.surface) < surfaceM2Totale) {
+        await transaction.rollback();
+        return res.status(400).json({
+          message: `Surface insuffisante pour ${produit.designation || produit.reference}. Disponible: ${parseFloat(produit.surface).toFixed(4)} m², Nécessaire: ${surfaceM2Totale.toFixed(4)} m²`,
+        });
+      }
+    }
+    console.log("✅ Surfaces disponibles suffisantes");
+    */
 
     // Generate invoice number
     const prefix = "FA";
@@ -803,37 +852,43 @@ const convertDevisToInvoice = async (req, res) => {
     const invoiceNumber = `${prefix}${sequence.toString().padStart(4, "0")}`;
 
     // Create invoice from devis
-    const invoice = await Facture.create({
-      invoiceNumber,
-      customerName: devis.customerName,
-      customerPhone: devis.customerPhone,
-      issueDate: new Date(),
-      notes: devis.notes,
-      status: "brouillon",
-      discountType: devis.discountType,
-      discountValue: parseFloat(devis.discountValue) || 0,
-      discountAmount: parseFloat(devis.discountAmount) || 0,
-      subTotal: parseFloat(devis.subTotal) || 0,
-      total: parseFloat(devis.total) || 0,
-      client_id: devis.client_id,
-      preparedById: devis.preparedById,
-      preparedBy: devis.preparedBy,
-    }, { transaction });
+    const invoice = await Facture.create(
+      {
+        invoiceNumber,
+        customerName: devis.customerName,
+        customerPhone: devis.customerPhone,
+        issueDate: new Date(),
+        notes: devis.notes,
+        status: "brouillon",
+        discountType: devis.discountType,
+        discountValue: parseFloat(devis.discountValue) || 0,
+        discountAmount: parseFloat(devis.discountAmount) || 0,
+        subTotal: parseFloat(devis.subTotal) || 0,
+        total: parseFloat(devis.total) || 0,
+        client_id: devis.client_id,
+        preparedById: devis.preparedById,
+        preparedBy: devis.preparedBy,
+      },
+      { transaction },
+    );
 
     // Create invoice items from devis lines
     for (const ligne of devis.lignes) {
-      await FactureItem.create({
-        quantite: ligne.quantite,
-        v1: ligne.v1,
-        v2: ligne.v2,
-        v3: ligne.v3 || 1,
-        prix_unitaire: ligne.prix_unitaire,
-        total_ligne: ligne.total_ligne,
-        remise_ligne: ligne.remise_ligne || 0,
-        designation: ligne.designation || ligne.articleName,
-        produit_id: ligne.produit_id,
-        facture_id: invoice.id,
-      }, { transaction });
+      await FactureItem.create(
+        {
+          quantite: ligne.quantite,
+          v1: ligne.v1,
+          v2: ligne.v2,
+          v3: ligne.v3 || 1,
+          prix_unitaire: ligne.prix_unitaire,
+          total_ligne: ligne.total_ligne,
+          remise_ligne: ligne.remise_ligne || 0,
+          designation: ligne.designation || ligne.articleName,
+          produit_id: ligne.produit_id,
+          facture_id: invoice.id,
+        },
+        { transaction },
+      );
     }
 
     // Update devis to mark as converted
@@ -843,6 +898,9 @@ const convertDevisToInvoice = async (req, res) => {
     await devis.save({ transaction });
 
     await transaction.commit();
+
+    // Reload to get updated values
+    await devis.reload();
 
     return res.json({
       message: "Devis converted to invoice successfully",
@@ -872,7 +930,9 @@ const convertDevisToBonLivraison = async (req, res) => {
     }
 
     if (devis.convertedToBonLivraison) {
-      return res.status(400).json({ message: "Devis already converted to bon livraison" });
+      return res
+        .status(400)
+        .json({ message: "Devis already converted to bon livraison" });
     }
 
     // Generate bon livraison number
@@ -893,37 +953,43 @@ const convertDevisToBonLivraison = async (req, res) => {
     const deliveryNumber = `${prefix}${sequence.toString().padStart(4, "0")}`;
 
     // Create bon livraison from devis
-    const bonLivraison = await BonLivraison.create({
-      deliveryNumber,
-      customerName: devis.customerName,
-      customerPhone: devis.customerPhone,
-      issueDate: new Date(),
-      notes: devis.notes,
-      status: "brouillon",
-      discountType: devis.discountType,
-      discountValue: parseFloat(devis.discountValue) || 0,
-      discountAmount: parseFloat(devis.discountAmount) || 0,
-      subTotal: parseFloat(devis.subTotal) || 0,
-      total: parseFloat(devis.total) || 0,
-      client_id: devis.client_id,
-      preparedById: devis.preparedById,
-      preparedBy: devis.preparedBy,
-    }, { transaction });
+    const bonLivraison = await BonLivraison.create(
+      {
+        deliveryNumber,
+        customerName: devis.customerName,
+        customerPhone: devis.customerPhone,
+        issueDate: new Date(),
+        notes: devis.notes,
+        status: "brouillon",
+        discountType: devis.discountType,
+        discountValue: parseFloat(devis.discountValue) || 0,
+        discountAmount: parseFloat(devis.discountAmount) || 0,
+        subTotal: parseFloat(devis.subTotal) || 0,
+        total: parseFloat(devis.total) || 0,
+        client_id: devis.client_id,
+        preparedById: devis.preparedById,
+        preparedBy: devis.preparedBy,
+      },
+      { transaction },
+    );
 
     // Create bon livraison items from devis lines
     for (const ligne of devis.lignes) {
-      await BonLivraisonProduit.create({
-        quantite: ligne.quantite,
-        v1: ligne.v1,
-        v2: ligne.v2,
-        v3: ligne.v3 || 1,
-        prix_unitaire: ligne.prix_unitaire,
-        total_ligne: ligne.total_ligne,
-        remise_ligne: ligne.remise_ligne || 0,
-        designation: ligne.designation || ligne.articleName,
-        produit_id: ligne.produit_id,
-        bon_livraison_id: bonLivraison.id,
-      }, { transaction });
+      await BonLivraisonProduit.create(
+        {
+          quantite: ligne.quantite,
+          v1: ligne.v1,
+          v2: ligne.v2,
+          v3: ligne.v3 || 1,
+          prix_unitaire: ligne.prix_unitaire,
+          total_ligne: ligne.total_ligne,
+          remise_ligne: ligne.remise_ligne || 0,
+          designation: ligne.designation || ligne.articleName,
+          produit_id: ligne.produit_id,
+          bon_livraison_id: bonLivraison.id,
+        },
+        { transaction },
+      );
     }
 
     // Update devis to mark as converted
@@ -933,6 +999,9 @@ const convertDevisToBonLivraison = async (req, res) => {
     await devis.save({ transaction });
 
     await transaction.commit();
+
+    // Reload to get updated values
+    await devis.reload();
 
     return res.json({
       message: "Devis converted to bon livraison successfully",
