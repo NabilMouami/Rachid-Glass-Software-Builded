@@ -92,32 +92,19 @@ const createFacture = async (req, res) => {
         throw new Error(`Produit avec ID ${item.productId} non trouvé`);
       }
 
-      // Récupérer L1 et L2 du payload (déjà en mm)
-      const l1Value = parseFloat(item.L1 || item.v1 || 1);
-      const l2Value = parseFloat(item.L2 || item.v2 || 1);
-      const quantite = parseFloat(item.quantity) || 1;
-
-      // Calcul exact en mm²
-      const surfaceMM2ParUnite = Math.round(l1Value * l2Value);
-      const surfaceMM2Totale = surfaceMM2ParUnite * quantite;
-      const surfaceM2Totale = surfaceMM2Totale / 10000;
+      // La qty représente directement la surface en m² à diminuer
+      const qtyValue = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
 
       console.log(`📐 Produit ${produit.reference}:`, {
-        L1_mm: l1Value,
-        L2_mm: l2Value,
-        quantite: quantite,
-        surface_par_unite_mm2: surfaceMM2ParUnite.toLocaleString("fr-FR"),
-        surface_totale_mm2: surfaceMM2Totale.toLocaleString("fr-FR"),
-        surface_necessaire_m2: surfaceM2Totale.toFixed(6),
+        qty_surface: qtyValue,
         surface_disponible_m2: parseFloat(produit.surface).toFixed(4),
       });
 
-      if (parseFloat(produit.surface) < surfaceM2Totale) {
+      if (parseFloat(produit.surface) < qtyValue) {
         throw new Error(
           `Surface insuffisante pour ${produit.designation || produit.reference}. ` +
             `Disponible: ${parseFloat(produit.surface).toFixed(4)} m², ` +
-            `Nécessaire: ${surfaceM2Totale.toFixed(4)} m² ` +
-            `(${surfaceMM2Totale.toLocaleString("fr-FR")} mm²)`,
+            `Nécessaire: ${qtyValue.toFixed(4)} m²`,
         );
       }
     }
@@ -131,18 +118,14 @@ const createFacture = async (req, res) => {
     // Prepare items with correct field names for FactureProduit
     console.log("🧮 Preparing items...");
     const preparedItems = items.map((item, index) => {
-      const l1Value = parseFloat(item.L1 || item.v1 || 1);
-      const l2Value = parseFloat(item.L2 || item.v2 || 1);
-      const quantite = parseFloat(item.quantity) || 1;
+      const quantite = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
       const prixUnitaire = parseFloat(item.unitPrice) || 0;
-
       const totalLigne = parseFloat(item.totalPrice) || prixUnitaire * quantite;
 
       console.log(`📦 Item ${index + 1}:`, {
         productId: item.productId,
         quantity: quantite,
-        L1_mm: l1Value,
-        L2_mm: l2Value,
+        surface: item.surface,
         unitPrice: prixUnitaire,
         totalPrice: totalLigne,
       });
@@ -150,8 +133,7 @@ const createFacture = async (req, res) => {
       return {
         produit_id: item.productId,
         quantite: quantite,
-        v1: l1Value,
-        v2: l2Value,
+        surface: quantite,
         prix_unitaire: prixUnitaire,
         total_ligne: totalLigne,
         remise_ligne: 0,
@@ -262,7 +244,7 @@ const createFacture = async (req, res) => {
     console.log(`✅ Created ${factureItems.length} FactureProduit items`);
 
     // =============================================
-    // DÉCRÉMENTER LA SURFACE DES PRODUITS (AVEC VALEUR EXACTE EN MM²)
+    // DÉCRÉMENTER LA SURFACE DES PRODUITS DIRECTEMENT PAR QTY
     // =============================================
     console.log("📉 Décrémentation des surfaces...");
 
@@ -278,59 +260,21 @@ const createFacture = async (req, res) => {
         );
       }
 
-      // Récupérer L1 et L2 du payload (déjà en mm)
-      const l1Value = parseFloat(item.L1 || item.v1 || produit.L1 || 1);
-      const l2Value = parseFloat(item.L2 || item.v2 || produit.L2 || 1);
-      const quantite = parseFloat(item.quantity) || 1;
-
-      // ===== CALCUL EXACT EN MM² =====
-      // 1. Surface en mm² par unité (arrondi à l'entier)
-      const surfaceMM2ParUnite = Math.round(l1Value * l2Value);
-
-      // 2. Surface totale en mm² (la valeur QUE VOUS VOULEZ décrémenter)
-      const surfaceMM2Totale = surfaceMM2ParUnite * quantite; // ← 54 002
-
-      // 3. Conversion en m² pour la base de données (conversion exacte)
-      const surfaceM2Totale = surfaceMM2Totale / 10000; // = 0.054002
-
-      // 4. Surface actuelle en m²
-      const surfaceActuelleM2 = parseFloat(produit.surface) || 0;
-
-      // 5. Nouvelle surface en m² (calculée avec précision)
-      const nouvelleSurfaceM2 = surfaceActuelleM2 - surfaceM2Totale;
-
-      // 6. Arrondir à 4 décimales pour correspondre au type DECIMAL(10,4)
-      const nouvelleSurfaceM2Arrondie = parseFloat(
-        nouvelleSurfaceM2.toFixed(4),
-      );
+      // La qty représente directement la surface en m² à diminuer
+      const qtyValue = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
+      const surfaceActuelle = parseFloat(produit.surface) || 0;
+      const nouvelleSurface = Math.max(0, surfaceActuelle - qtyValue);
 
       console.log(`📊 Produit ${produit.reference}:`, {
-        // Dimensions en mm
-        L1_mm: l1Value,
-        L2_mm: l2Value,
-        quantite: quantite,
-
-        // Surfaces en mm² (ce que vous voulez décrémenter)
-        surface_par_unite_mm2: surfaceMM2ParUnite.toLocaleString("fr-FR"),
-        surface_totale_mm2: surfaceMM2Totale.toLocaleString("fr-FR"), // ← 54 002
-
-        // Surfaces en m² (avec précision)
-        surface_a_decrementer_m2_exact: surfaceM2Totale.toFixed(6), // 0.054002
-        surface_a_decrementer_m2_arrondi: surfaceM2Totale.toFixed(4), // 0.0540
-
-        // Surfaces en m² (stockées en DB)
-        surface_actuelle_m2: surfaceActuelleM2.toFixed(4),
-        nouvelle_surface_m2_calculee: nouvelleSurfaceM2.toFixed(6),
-        nouvelle_surface_m2_arrondie: nouvelleSurfaceM2Arrondie.toFixed(4),
-
-        // Vérification
-        verification: `${surfaceMM2Totale.toLocaleString("fr-FR")} mm² = ${surfaceM2Totale.toFixed(6)} m²`,
+        surface_actuelle_m2: surfaceActuelle.toFixed(4),
+        qty_surface_decremente: qtyValue.toFixed(4),
+        nouvelle_surface_m2: nouvelleSurface.toFixed(4),
       });
 
       // Mise à jour avec hooks désactivés
       await Produit.update(
         {
-          surface: nouvelleSurfaceM2Arrondie,
+          surface: nouvelleSurface,
         },
         {
           where: { id: item.productId },
@@ -339,19 +283,8 @@ const createFacture = async (req, res) => {
         },
       );
 
-      // Vérifier la mise à jour
-      const produitVerif = await Produit.findByPk(item.productId, {
-        transaction,
-      });
-
       console.log(
-        `✅ Produit ${produit.reference} mis à jour: ${produitVerif.surface} m²`,
-      );
-      console.log(
-        `   Décrémenté: ${surfaceMM2Totale.toLocaleString("fr-FR")} mm² (${surfaceM2Totale.toFixed(6)} m²)`,
-      );
-      console.log(
-        `   Vérification: ${surfaceActuelleM2.toFixed(4)} - ${surfaceM2Totale.toFixed(4)} = ${(surfaceActuelleM2 - surfaceM2Totale).toFixed(4)} m²`,
+        `✅ Produit ${produit.reference}: ${surfaceActuelle.toFixed(4)} - ${qtyValue.toFixed(4)} = ${nouvelleSurface.toFixed(4)} m²`,
       );
     }
 
@@ -456,26 +389,20 @@ const createFacture = async (req, res) => {
 const getFactures = async (req, res) => {
   try {
     const factures = await Facture.findAll({
-      include: [
-        {
-          model: FactureProduit,
-          as: "lignes",
-          include: [
-            {
-              model: Produit,
-              as: "produit",
-            },
-          ],
-        },
-        { model: Client, as: "client" },
-        { model: Advancement, as: "advancements" },
-        {
-          model: BonLivraison,
-          as: "bonLivraison",
-          required: false,
-        },
-        { model: User, as: "preparator", attributes: ["id", "name", "email"] },
-        { model: User, as: "validator", attributes: ["id", "name", "email"] },
+      attributes: [
+        "id",
+        "invoiceNumber",
+        "customerName",
+        "customerPhone",
+        "totalHT",
+        "totalTTC",
+        "tvaAmount",
+        "tvaRate",
+        "advancement",
+        "remainingAmount",
+        "status",
+        "issueDate",
+        "createdAt",
       ],
       order: [["createdAt", "DESC"]],
     });

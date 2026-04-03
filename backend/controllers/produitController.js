@@ -33,23 +33,6 @@ const createProduit = async (req, res) => {
       });
     }
 
-    // Validate prix_vente > prix_achat (optional business rule)
-    if (parseFloat(prix_vente) <= parseFloat(prix_achat)) {
-      return res.status(400).json({
-        message: "Le prix de vente doit être supérieur au prix d'achat",
-      });
-    }
-
-    // Validate prix_vente_min and prix_vente_max if both provided
-    if (prix_vente_min && prix_vente_max) {
-      if (parseFloat(prix_vente_min) > parseFloat(prix_vente_max)) {
-        return res.status(400).json({
-          message:
-            "Le prix de vente minimum ne peut pas être supérieur au prix maximum",
-        });
-      }
-    }
-
     // Check if reference already exists
     const existingReference = await Produit.findOne({ where: { reference } });
     if (existingReference) {
@@ -68,20 +51,14 @@ const createProduit = async (req, res) => {
       }
     }
 
-    // Calculate surface if dimensions provided but surface not provided
-    let calculatedSurface = surface;
-    if (!calculatedSurface && L1 && L2) {
-      calculatedSurface = (parseFloat(L1) / 100) * (parseFloat(L2) / 100);
-    }
-
     // Calculate prix_total if not provided but we have surface, prix_vente and qty
     let calculatedPrixTotal = prix_total;
-    if (!calculatedPrixTotal && calculatedSurface && prix_vente && qty) {
+    if (!calculatedPrixTotal && surface && prix_vente && qty) {
       calculatedPrixTotal =
-        calculatedSurface * parseFloat(prix_vente) * parseInt(qty || 0);
+        parseFloat(surface) * parseFloat(prix_vente) * parseInt(qty || 0);
     }
 
-    // Create produit
+    // Create produit - surface is set directly by user
     const produit = await Produit.create({
       reference,
       designation,
@@ -91,7 +68,7 @@ const createProduit = async (req, res) => {
       prix_vente: parseFloat(prix_vente),
       L1: L1 ? parseInt(L1) : null,
       L2: L2 ? parseInt(L2) : null,
-      surface: calculatedSurface ? parseFloat(calculatedSurface) : 0,
+      surface: surface ? parseFloat(surface) : 0,
       prix_total: calculatedPrixTotal ? parseFloat(calculatedPrixTotal) : null,
       prix_vente_min: prix_vente_min ? parseFloat(prix_vente_min) : null,
       prix_vente_max: prix_vente_max ? parseFloat(prix_vente_max) : null,
@@ -326,39 +303,6 @@ const updateProduit = async (req, res) => {
       }
     }
 
-    // Validate prix_vente > prix_achat (if both are being updated)
-    if (prix_achat !== undefined && prix_vente !== undefined) {
-      if (parseFloat(prix_vente) <= parseFloat(prix_achat)) {
-        return res.status(400).json({
-          message: "Le prix de vente doit être supérieur au prix d'achat",
-        });
-      }
-    } else if (
-      prix_vente !== undefined &&
-      parseFloat(prix_vente) <= produit.prix_achat
-    ) {
-      return res.status(400).json({
-        message: "Le prix de vente doit être supérieur au prix d'achat",
-      });
-    } else if (
-      prix_achat !== undefined &&
-      produit.prix_vente <= parseFloat(prix_achat)
-    ) {
-      return res.status(400).json({
-        message: "Le prix de vente doit être supérieur au prix d'achat",
-      });
-    }
-
-    // Validate prix_vente_min and prix_vente_max if both provided
-    if (prix_vente_min && prix_vente_max) {
-      if (parseFloat(prix_vente_min) > parseFloat(prix_vente_max)) {
-        return res.status(400).json({
-          message:
-            "Le prix de vente minimum ne peut pas être supérieur au prix maximum",
-        });
-      }
-    }
-
     // Check if fornisseur exists (if fornisseurId is provided)
     if (fornisseurId !== undefined && fornisseurId) {
       const fornisseur = await Fornisseur.findByPk(fornisseurId);
@@ -396,17 +340,7 @@ const updateProduit = async (req, res) => {
     if (fornisseurId !== undefined)
       updateData.fornisseurId = fornisseurId || null;
 
-    // If dimensions are updated but surface not provided, recalculate surface
-    if ((L1 !== undefined || L2 !== undefined) && surface === undefined) {
-      const newL1 = L1 !== undefined ? L1 : produit.L1;
-      const newL2 = L2 !== undefined ? L2 : produit.L2;
-      if (newL1 && newL2) {
-        updateData.surface =
-          (parseFloat(newL1) / 100) * (parseFloat(newL2) / 100);
-      }
-    }
-
-    // Update produit
+    // Update produit - surface is set directly by user
     await produit.update(updateData);
 
     // Load updated produit with fornisseur info

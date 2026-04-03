@@ -317,12 +317,16 @@ const createBonLivraison = async (req, res) => {
 const getBonLivraisons = async (req, res) => {
   try {
     const bonLivraisons = await BonLivraison.findAll({
-      include: [
-        { model: BonLivraisonProduit, as: "lignes" },
-        { model: Client, as: "client" },
-        { model: Advancement, as: "advancements" },
-        { model: User, as: "preparator", attributes: ["id", "name", "email"] },
-        { model: User, as: "validator", attributes: ["id", "name", "email"] },
+      attributes: [
+        "id",
+        "deliveryNumber",
+        "customerName",
+        "customerPhone",
+        "total",
+        "advancement",
+        "remainingAmount",
+        "status",
+        "createdAt",
       ],
       order: [["createdAt", "DESC"]],
     });

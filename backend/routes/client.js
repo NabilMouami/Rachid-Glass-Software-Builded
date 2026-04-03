@@ -10,6 +10,7 @@ const {
   getClientStats,
   getClientSummary,
   getClientHistory,
+  getClientProducts,
   getClientProductHistory,
   getClientProductHistoryByReference,
   getClientPaymentStatus,
@@ -33,7 +34,8 @@ router.get("/:id/history", getClientHistory);
 
 // GET client summary (quick stats)
 router.get("/:id/summary", getClientSummary);
-router.get("/:id/products", getClientProductHistory);
+router.get("/:id/products", getClientProducts); // Returns grouped products with statistics
+router.get("/:id/products-history", getClientProductHistory); // Returns individual line items
 router.get("/:id/products-by-reference", getClientProductHistoryByReference);
 // Add this route to your existing client routes
 router.get("/:id/payment-status", getClientPaymentStatus);

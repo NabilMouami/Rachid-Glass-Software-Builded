@@ -14,6 +14,7 @@ const Devis = sequelize.define(
       type: DataTypes.STRING(12),
       allowNull: false,
       unique: true,
+      field: "devis_number",
     },
     customerName: {
       type: DataTypes.STRING,

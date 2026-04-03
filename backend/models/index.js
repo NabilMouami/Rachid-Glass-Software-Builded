@@ -15,7 +15,8 @@ const DevisItem = require("./DevisItem");
 // Import new Facture models
 const Facture = require("./Facture");
 const FactureProduit = require("./FactureProduit");
-
+const FactureAchat = require("./FactureAchat");
+const FactureAchatProduit = require("./FactureAchatProduit");
 // ============================================
 // USER ASSOCIATIONS
 // ============================================
@@ -317,6 +318,78 @@ Produit.hasMany(FactureProduit, {
   onDelete: "CASCADE",
 });
 
+Fornisseur.hasMany(FactureAchat, {
+  foreignKey: "fornisseurId",
+  as: "facturesAchat",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+FactureAchat.belongsTo(Fornisseur, {
+  foreignKey: "fornisseurId",
+  as: "fornisseur",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+FactureAchat.belongsTo(User, {
+  foreignKey: "preparedById",
+  as: "preparator",
+  onDelete: "SET NULL",
+  onUpdate: "CASCADE",
+});
+
+FactureAchat.belongsTo(User, {
+  foreignKey: "validatedById",
+  as: "validator",
+  onDelete: "SET NULL",
+  onUpdate: "CASCADE",
+});
+
+// Many-to-Many relationship between FactureAchat and Produit
+FactureAchat.belongsToMany(Produit, {
+  through: FactureAchatProduit,
+  foreignKey: "facture_achat_id",
+  otherKey: "produit_id",
+  as: "produitsAchat",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
+});
+
+Produit.belongsToMany(FactureAchat, {
+  through: FactureAchatProduit,
+  foreignKey: "produit_id",
+  otherKey: "facture_achat_id",
+  as: "facturesAchat",
+  onDelete: "CASCADE",
+  onUpdate: "CASCADE",
+});
+
+// Direct relationships for FactureAchatProduit
+FactureAchatProduit.belongsTo(FactureAchat, {
+  foreignKey: "facture_achat_id",
+  as: "factureAchat",
+  onDelete: "CASCADE",
+});
+
+FactureAchatProduit.belongsTo(Produit, {
+  foreignKey: "produit_id",
+  as: "produit",
+  onDelete: "CASCADE",
+});
+
+FactureAchat.hasMany(FactureAchatProduit, {
+  foreignKey: "facture_achat_id",
+  as: "lignes",
+  onDelete: "CASCADE",
+});
+
+Produit.hasMany(FactureAchatProduit, {
+  foreignKey: "produit_id",
+  as: "factureAchatItems",
+  onDelete: "CASCADE",
+});
+
 // ============================================
 // EXPORT ALL MODELS
 // ============================================
@@ -333,6 +406,8 @@ const db = {
   BonLivraisonProduit,
   Facture,
   FactureProduit,
+  FactureAchat,
+  FactureAchatProduit,
 };
 
 module.exports = db;

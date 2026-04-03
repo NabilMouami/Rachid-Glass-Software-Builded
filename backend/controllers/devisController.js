@@ -184,10 +184,17 @@ const createDevis = async (req, res) => {
 const getDevis = async (req, res) => {
   try {
     const devis = await Devis.findAll({
-      attributes: {
-        exclude: ["pdfPath", "pdfUploadedAt"], // Temporarily exclude these fields
-      },
-      include: [{ model: DevisItem, as: "lignes" }],
+      attributes: [
+        "id",
+        "devisNumber",
+        "customerName",
+        "customerPhone",
+        "total",
+        "status",
+        "issueDate",
+        "validUntil",
+        "createdAt",
+      ],
       order: [["createdAt", "DESC"]],
     });
     return res.json(devis);

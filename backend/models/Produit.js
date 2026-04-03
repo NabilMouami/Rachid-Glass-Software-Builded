@@ -137,14 +137,6 @@ Produit.init(
 
     hooks: {
       beforeValidate: (instance) => {
-        // Calcul automatique surface: L1 * L2 * qty (avec conversion mm² en m²)
-        if (instance.L1 && instance.L2) {
-          // Convertir mm en m: (L1/1000) * (L2/1000) * qty
-          const surfacePerUnit = (instance.L1 / 100) * (instance.L2 / 100);
-          const totalSurface = surfacePerUnit * (instance.qty || 1); // Utilise qty ou 1 par défaut
-          instance.surface = totalSurface.toFixed(4);
-        }
-
         // Vérification prix min / max
         if (
           instance.prix_vente_min &&
@@ -161,21 +153,6 @@ Produit.init(
         // Assurer que qty a une valeur par défaut de 1 si non définie
         if (instance.qty === null || instance.qty === undefined) {
           instance.qty = 1;
-        }
-      },
-
-      beforeUpdate: (instance) => {
-        // Recalculer la surface si L1, L2 ou qty change
-        if (
-          instance.changed("L1") ||
-          instance.changed("L2") ||
-          instance.changed("qty")
-        ) {
-          if (instance.L1 && instance.L2) {
-            const surfacePerUnit = (instance.L1 / 100) * (instance.L2 / 100);
-            const totalSurface = surfacePerUnit * (instance.qty || 1);
-            instance.surface = totalSurface.toFixed(4);
-          }
         }
       },
     },

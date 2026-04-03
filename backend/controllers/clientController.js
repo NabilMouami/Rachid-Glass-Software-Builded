@@ -824,7 +824,7 @@ const getClientProductHistory = async (req, res) => {
         [sequelize.literal(`devis_id`), "document_id"],
         [
           sequelize.literal(
-            `(SELECT devisNumber FROM devis WHERE id = devis_id)`,
+            `(SELECT devis_number FROM devis WHERE id = devis_id)`,
           ),
           "document_num",
         ],
@@ -872,7 +872,7 @@ const getClientProductHistory = async (req, res) => {
         [sequelize.literal(`bon_livraison_id`), "document_id"],
         [
           sequelize.literal(
-            `(SELECT deliveryNumber FROM bon_livraisons WHERE id = bon_livraison_id)`,
+            `(SELECT delivery_number FROM bon_livraisons WHERE id = bon_livraison_id)`,
           ),
           "document_num",
         ],
@@ -921,7 +921,7 @@ const getClientProductHistory = async (req, res) => {
         [sequelize.literal(`facture_id`), "document_id"],
         [
           sequelize.literal(
-            `(SELECT invoiceNumber FROM factures WHERE id = facture_id)`,
+            `(SELECT invoice_number FROM factures WHERE id = facture_id)`,
           ),
           "document_num",
         ],
@@ -1066,6 +1066,8 @@ const getClientProducts = async (req, res) => {
     const { id } = req.params;
     const { search, documentType, startDate, endDate } = req.query;
 
+    console.log("=== getClientProducts called for client:", id, "startDate:", startDate, "endDate:", endDate);
+
     const client = await Client.findByPk(id, {
       attributes: ["id", "nom_complete", "telephone", "ville"],
     });
@@ -1074,22 +1076,42 @@ const getClientProducts = async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
+    // Use raw date strings for SQL queries
     const dateFilter = {};
-    if (startDate) dateFilter[Op.gte] = new Date(startDate);
-    if (endDate) dateFilter[Op.lte] = new Date(endDate);
+    if (startDate) dateFilter.gte = startDate;
+    if (endDate) dateFilter.lte = endDate;
 
     const productMap = {};
 
-    const processItems = (items, type, dateField) => {
+    // Process raw SQL query results
+    const processRawItems = (items, type) => {
+      console.log(`Processing ${items.length} items for type: ${type}`);
+      let skipped = 0;
+      let processed = 0;
+      
       items.forEach((item) => {
-        if (!item.produit) return;
+        // Skip items without produit_id
+        if (!item.produit_id) {
+          skipped++;
+          return;
+        }
 
-        const productId = item.produit.id;
-        const docDate = item[dateField]?.issueDate;
+        const productId = item.produit_id;
+        const docDate = item.issue_date;
+        const docNum = item.devis_number || item.delivery_number || item.invoice_number;
+        const docId = item.devis_id || item.bon_livraison_id || item.facture_id;
+
+        // Create produit object from raw results
+        const produit = {
+          id: item.produit_id,
+          designation: item.designation,
+          reference: item.reference,
+          prix_vente: item.prix_vente,
+        };
 
         if (!productMap[productId]) {
           productMap[productId] = {
-            product: item.produit,
+            product: produit,
             totalQuantity: 0,
             totalAmount: 0,
             firstPurchase: docDate,
@@ -1103,150 +1125,119 @@ const getClientProducts = async (req, res) => {
         p.totalQuantity += Number(item.quantite || 0);
         p.totalAmount += Number(item.total_ligne || 0);
 
-        if (docDate < p.firstPurchase) p.firstPurchase = docDate;
-        if (docDate > p.lastPurchase) p.lastPurchase = docDate;
+        if (docDate && (!p.firstPurchase || docDate < p.firstPurchase)) p.firstPurchase = docDate;
+        if (docDate && (!p.lastPurchase || docDate > p.lastPurchase)) p.lastPurchase = docDate;
 
         p.documents.push({
           type,
-          id: item.document_id,
-          num: item.document_num,
+          id: docId,
+          num: docNum,
           date: docDate,
           quantity: item.quantite,
           unitPrice: item.prix_unitaire,
           amount: item.total_ligne,
         });
+        processed++;
       });
+      console.log(`Processed: ${processed}, Skipped: ${skipped}`);
     };
 
     /* ===================== DEVIS ===================== */
     if (!documentType || documentType === "devis") {
-      const devisProducts = await DevisItem.findAll({
-        include: [
-          {
-            model: Devis,
-            as: "devis",
-            where: { client_id: id },
-            attributes: ["id", "devisNumber", "issueDate"],
-            ...(Object.keys(dateFilter).length && {
-              where: {
-                client_id: id,
-                issueDate: dateFilter,
-              },
-            }),
-          },
-          {
-            model: Produit,
-            as: "produit",
-            attributes: [
-              "id",
-              "designation",
-              "reference",
-              "prix_vente",
-              "unite",
-            ],
-            ...(search && {
-              where: {
-                [Op.or]: [
-                  { designation: { [Op.like]: `%${search}%` } },
-                  { reference: { [Op.like]: `%${search}%` } },
-                ],
-              },
-            }),
-          },
-        ],
-        attributes: [
-          "quantite",
-          "prix_unitaire",
-          "total_ligne",
-          [sequelize.literal(`'devis'`), "document_type"],
-          [sequelize.col("devis.id"), "document_id"],
-          [sequelize.col("devis.devisNumber"), "document_num"],
-        ],
+      // Build where clause for Devis using raw query to ensure correct date filtering
+      let devisQuery = `
+        SELECT di.*, d.devis_number, d.issue_date, 
+               p.id as produit_id, p.designation, p.reference, p.prix_vente
+        FROM devis_items di
+        INNER JOIN devis d ON di.devis_id = d.id
+        LEFT JOIN produits p ON di.produit_id = p.id
+        WHERE d.client_id = ?
+      `;
+      const devisParams = [id];
+      
+      if (Object.keys(dateFilter).length > 0) {
+        if (dateFilter.gte) {
+          devisQuery += ` AND d.issue_date >= ?`;
+          devisParams.push(dateFilter.gte);
+        }
+        if (dateFilter.lte) {
+          devisQuery += ` AND d.issue_date <= ?`;
+          devisParams.push(dateFilter.lte);
+        }
+      }
+      
+      const devisProducts = await sequelize.query(devisQuery, {
+        replacements: devisParams,
+        type: sequelize.QueryTypes.SELECT,
+        mapToModel: true,
       });
 
-      processItems(devisProducts, "devis", "devis");
+      console.log("Devis products found:", devisProducts.length);
+      processRawItems(devisProducts, "devis");
     }
 
     /* ===================== BON LIVRAISON ===================== */
     if (!documentType || documentType === "bon-livraison") {
-      const blProducts = await BonLivraisonProduit.findAll({
-        include: [
-          {
-            model: BonLivraison,
-            as: "bonLivraison",
-            where: { client_id: id },
-            attributes: ["id", "deliveryNumber", "issueDate"],
-            ...(Object.keys(dateFilter).length && {
-              where: {
-                client_id: id,
-                issueDate: dateFilter,
-              },
-            }),
-          },
-          {
-            model: Produit,
-            as: "produit",
-            attributes: [
-              "id",
-              "designation",
-              "reference",
-              "prix_vente",
-              "unite",
-            ],
-          },
-        ],
-        attributes: [
-          "quantite",
-          "prix_unitaire",
-          "total_ligne",
-          [sequelize.literal(`'bon-livraison'`), "document_type"],
-          [sequelize.col("bonLivraison.id"), "document_id"],
-          [sequelize.col("bonLivraison.deliveryNumber"), "document_num"],
-        ],
+      let blQuery = `
+        SELECT blp.*, bl.delivery_number, bl.issue_date,
+               p.id as produit_id, p.designation, p.reference, p.prix_vente
+        FROM bon_livraison_produits blp
+        INNER JOIN bon_livraisons bl ON blp.bon_livraison_id = bl.id
+        LEFT JOIN produits p ON blp.produit_id = p.id
+        WHERE bl.client_id = ?
+      `;
+      const blParams = [id];
+      
+      if (Object.keys(dateFilter).length > 0) {
+        if (dateFilter.gte) {
+          blQuery += ` AND bl.issue_date >= ?`;
+          blParams.push(dateFilter.gte);
+        }
+        if (dateFilter.lte) {
+          blQuery += ` AND bl.issue_date <= ?`;
+          blParams.push(dateFilter.lte);
+        }
+      }
+      
+      const blProducts = await sequelize.query(blQuery, {
+        replacements: blParams,
+        type: sequelize.QueryTypes.SELECT,
       });
 
-      processItems(blProducts, "bon-livraison", "bonLivraison");
+      console.log("BL products found:", blProducts.length);
+      processRawItems(blProducts, "bon-livraison");
     }
 
     /* ===================== FACTURE ===================== */
     if (!documentType || documentType === "facture") {
-      const factureProducts = await FactureProduit.findAll({
-        include: [
-          {
-            model: Facture,
-            as: "facture",
-            where: { client_id: id },
-            attributes: ["id", "invoiceNumber", "issueDate"],
-            ...(Object.keys(dateFilter).length && {
-              where: {
-                client_id: id,
-                issueDate: dateFilter,
-              },
-            }),
-          },
-          {
-            model: Produit,
-            as: "produit",
-            attributes: [
-              "id",
-              "designation",
-              "reference",
-              "prix_vente",
-              "unite",
-            ],
-          },
-        ],
-        attributes: [
-          "quantite",
-          "prix_unitaire",
-          "total_ligne",
-          [sequelize.literal(`'facture'`), "document_type"],
-          [sequelize.col("facture.id"), "document_id"],
-          [sequelize.col("facture.invoiceNumber"), "document_num"],
-        ],
+      let factureQuery = `
+        SELECT fp.*, f.invoice_number, f.issue_date,
+               p.id as produit_id, p.designation, p.reference, p.prix_vente
+        FROM facture_produits fp
+        INNER JOIN factures f ON fp.facture_id = f.id
+        LEFT JOIN produits p ON fp.produit_id = p.id
+        WHERE f.client_id = ?
+      `;
+      const factureParams = [id];
+      
+      if (Object.keys(dateFilter).length > 0) {
+        if (dateFilter.gte) {
+          factureQuery += ` AND f.issue_date >= ?`;
+          factureParams.push(dateFilter.gte);
+        }
+        if (dateFilter.lte) {
+          factureQuery += ` AND f.issue_date <= ?`;
+          factureParams.push(dateFilter.lte);
+        }
+      }
+      
+      const factureProducts = await sequelize.query(factureQuery, {
+        replacements: factureParams,
+        type: sequelize.QueryTypes.SELECT,
       });
 
-      processItems(factureProducts, "facture", "facture");
+      console.log("Facture products found:", factureProducts.length);
+      processRawItems(factureProducts, "facture");
     }
 
     const products = Object.values(productMap).sort(
@@ -1256,6 +1247,10 @@ const getClientProducts = async (req, res) => {
     const totalProducts = products.length;
     const totalQuantity = products.reduce((sum, p) => sum + p.totalQuantity, 0);
     const totalAmount = products.reduce((sum, p) => sum + p.totalAmount, 0);
+
+    console.log("=== Final Products Result ===");
+    console.log("Total products:", totalProducts);
+    console.log("Products:", JSON.stringify(products, null, 2));
 
     return res.json({
       message: "Client products retrieved successfully",
@@ -1271,6 +1266,7 @@ const getClientProducts = async (req, res) => {
     });
   } catch (err) {
     console.error("Error in getClientProducts:", err);
+    console.error("Stack:", err.stack);
     return res.status(500).json({
       message: "Server error",
       error: err.message,

@@ -17,6 +17,8 @@ const devisRoutes = require("./routes/devis");
 const analyticsRoutes = require("./routes/analytics");
 const bonLivraison = require("./routes/bonLivraison");
 const facture = require("./routes/facture");
+const factureAchatRoutes = require("./routes/factureAchat");
+
 const reportRoutes = require("./routes/reports");
 
 const seedAdmin = require("./utils/seedAdmin");
@@ -83,6 +85,7 @@ app.use("/api/devis", devisRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/bonlivraisons", bonLivraison);
 app.use("/api/factures", facture);
+app.use("/api/factures-achat", factureAchatRoutes);
 app.use("/api/reports", reportRoutes);
 
 // Health check
