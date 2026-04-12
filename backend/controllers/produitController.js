@@ -1,4 +1,15 @@
-const { Produit, Fornisseur } = require("../models");
+const {
+  Produit,
+  Fornisseur,
+  Client,
+  Devis,
+  DevisItem,
+  BonLivraison,
+  BonLivraisonProduit,
+  Facture,
+  FactureProduit,
+  sequelize,
+} = require("../models");
 const { Op } = require("sequelize");
 
 // Create a new produit
@@ -833,6 +844,391 @@ const getFornisseurStats = async (req, res) => {
   }
 };
 
+// Get complete product history with all documents (Devis, BL, Factures)
+const getProductHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      startDate,
+      endDate,
+      documentType,
+      sortBy = "issueDate",
+      sortOrder = "DESC",
+      limit = 50,
+      page = 1,
+    } = req.query;
+
+    // Check if product exists
+    const produit = await Produit.findByPk(id, {
+      include: [
+        {
+          model: Fornisseur,
+          as: "fornisseur",
+          attributes: ["id", "nom_complete", "telephone", "ville"],
+        },
+      ],
+    });
+
+    if (!produit) {
+      return res.status(404).json({
+        message: "Produit not found",
+      });
+    }
+
+    // Calculate offset for pagination
+    const offset = (page - 1) * limit;
+
+    // Build date filter
+    const dateFilter = {};
+    if (startDate) {
+      dateFilter[Op.gte] = new Date(startDate);
+    }
+    if (endDate) {
+      dateFilter[Op.lte] = new Date(endDate);
+    }
+    const hasDateFilter = Object.keys(dateFilter).length > 0;
+
+    // Initialize arrays for different document types
+    let devis = [];
+    let bonLivraisons = [];
+    let factures = [];
+    let totalCount = 0;
+
+    // ---- DEVIS ----
+    if (!documentType || documentType === "devis") {
+      const devisItemWhere = { produit_id: id };
+
+      devis = await DevisItem.findAll({
+        where: devisItemWhere,
+        attributes: [
+          "id",
+          "quantite",
+          "v1",
+          "v2",
+          "prix_unitaire",
+          "remise_ligne",
+          "total_ligne",
+          "articleName",
+        ],
+        include: [
+          {
+            model: Devis,
+            as: "devis",
+            attributes: [
+              "id",
+              "devisNumber",
+              "issueDate",
+              "subTotal",
+              "total",
+              "status",
+              "discountValue",
+              "notes",
+            ],
+            where: hasDateFilter ? { issueDate: dateFilter } : undefined,
+            required: true,
+            include: [
+              {
+                model: Client,
+                as: "client",
+                attributes: ["id", "nom_complete", "telephone", "ville"],
+              },
+            ],
+          },
+        ],
+        order: [[{ model: Devis, as: "devis" }, sortBy, sortOrder]],
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+      });
+
+      // Count total devis items for this product
+      const devisCountWhere = { produit_id: id };
+      if (hasDateFilter) {
+        const devisCountResult = await DevisItem.count({
+          where: devisCountWhere,
+          include: [
+            {
+              model: Devis,
+              as: "devis",
+              where: { issueDate: dateFilter },
+              required: true,
+            },
+          ],
+        });
+        totalCount += devisCountResult;
+      } else {
+        totalCount += await DevisItem.count({ where: devisCountWhere });
+      }
+    }
+
+    // ---- BON LIVRAISONS ----
+    if (!documentType || documentType === "bon-livraison") {
+      const blProduitWhere = { produit_id: id };
+
+      bonLivraisons = await BonLivraisonProduit.findAll({
+        where: blProduitWhere,
+        attributes: [
+          "id",
+          "quantite",
+          "v1",
+          "v2",
+          "prix_unitaire",
+          "remise_ligne",
+          "total_ligne",
+          "deliveredQuantity",
+        ],
+        include: [
+          {
+            model: BonLivraison,
+            as: "bonLivraison",
+            attributes: [
+              "id",
+              "deliveryNumber",
+              "issueDate",
+              "subTotal",
+              "total",
+              "status",
+              "discountValue",
+              "paymentType",
+              "advancement",
+              "remainingAmount",
+              "notes",
+            ],
+            where: hasDateFilter ? { issueDate: dateFilter } : undefined,
+            required: true,
+            include: [
+              {
+                model: Client,
+                as: "client",
+                attributes: ["id", "nom_complete", "telephone", "ville"],
+              },
+              {
+                model: Facture,
+                as: "facture",
+                attributes: ["id", "invoiceNumber", "status"],
+                required: false,
+              },
+            ],
+          },
+        ],
+        order: [
+          [{ model: BonLivraison, as: "bonLivraison" }, sortBy, sortOrder],
+        ],
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+      });
+
+      // Count total BL items for this product
+      const blCountWhere = { produit_id: id };
+      if (hasDateFilter) {
+        const blCountResult = await BonLivraisonProduit.count({
+          where: blCountWhere,
+          include: [
+            {
+              model: BonLivraison,
+              as: "bonLivraison",
+              where: { issueDate: dateFilter },
+              required: true,
+            },
+          ],
+        });
+        totalCount += blCountResult;
+      } else {
+        totalCount += await BonLivraisonProduit.count({ where: blCountWhere });
+      }
+    }
+
+    // ---- FACTURES ----
+    if (!documentType || documentType === "facture") {
+      const factureProduitWhere = { produit_id: id };
+
+      factures = await FactureProduit.findAll({
+        where: factureProduitWhere,
+        attributes: [
+          "id",
+          "quantite",
+          "v1",
+          "v2",
+          "prix_unitaire",
+          "remise_ligne",
+          "total_ligne",
+          "tva_ligne",
+        ],
+        include: [
+          {
+            model: Facture,
+            as: "facture",
+            attributes: [
+              "id",
+              "invoiceNumber",
+              "issueDate",
+              "totalHT",
+              "totalTTC",
+              "advancement",
+              "remainingAmount",
+              "status",
+              "discountValue",
+              "paymentType",
+              "notes",
+            ],
+            where: hasDateFilter ? { issueDate: dateFilter } : undefined,
+            required: true,
+            include: [
+              {
+                model: Client,
+                as: "client",
+                attributes: ["id", "nom_complete", "telephone", "ville"],
+              },
+              {
+                model: BonLivraison,
+                as: "bonLivraison",
+                attributes: ["id", "deliveryNumber", "status"],
+                required: false,
+              },
+            ],
+          },
+        ],
+        order: [[{ model: Facture, as: "facture" }, sortBy, sortOrder]],
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+      });
+
+      // Count total facture items for this product
+      const factureCountWhere = { produit_id: id };
+      if (hasDateFilter) {
+        const factureCountResult = await FactureProduit.count({
+          where: factureCountWhere,
+          include: [
+            {
+              model: Facture,
+              as: "facture",
+              where: { issueDate: dateFilter },
+              required: true,
+            },
+          ],
+        });
+        totalCount += factureCountResult;
+      } else {
+        totalCount += await FactureProduit.count({ where: factureCountWhere });
+      }
+    }
+
+    // ---- STATISTICS ----
+    const totalDevisItems = await DevisItem.count({
+      where: { produit_id: id },
+    });
+    const totalBLItems = await BonLivraisonProduit.count({
+      where: { produit_id: id },
+    });
+    const totalFactureItems = await FactureProduit.count({
+      where: { produit_id: id },
+    });
+
+    // Total quantity sold across all document types
+    const devisQtyResult = await DevisItem.sum("quantite", {
+      where: { produit_id: id },
+    });
+    const blQtyResult = await BonLivraisonProduit.sum("quantite", {
+      where: { produit_id: id },
+    });
+    const factureQtyResult = await FactureProduit.sum("quantite", {
+      where: { produit_id: id },
+    });
+
+    // Total revenue across document types
+    const devisTotalResult = await DevisItem.sum("total_ligne", {
+      where: { produit_id: id },
+    });
+    const blTotalResult = await BonLivraisonProduit.sum("total_ligne", {
+      where: { produit_id: id },
+    });
+    const factureTotalResult = await FactureProduit.sum("total_ligne", {
+      where: { produit_id: id },
+    });
+
+    // Unique clients who purchased this product
+    const uniqueClients = await sequelize.query(
+      `SELECT DISTINCT c.id, c.nom_complete, c.telephone, c.ville
+       FROM clients c
+       WHERE c.id IN (
+         SELECT DISTINCT d.client_id FROM devis d
+         INNER JOIN devis_items di ON di.devis_id = d.id
+         WHERE di.produit_id = :productId AND d.client_id IS NOT NULL
+         UNION
+         SELECT DISTINCT bl.client_id FROM bon_livraisons bl
+         INNER JOIN bon_livraison_produits blp ON blp.bon_livraison_id = bl.id
+         WHERE blp.produit_id = :productId AND bl.client_id IS NOT NULL
+         UNION
+         SELECT DISTINCT f.client_id FROM factures f
+         INNER JOIN facture_produits fp ON fp.facture_id = f.id
+         WHERE fp.produit_id = :productId AND f.client_id IS NOT NULL
+       )
+       ORDER BY c.nom_complete ASC`,
+      {
+        replacements: { productId: id },
+        type: sequelize.QueryTypes.SELECT,
+      },
+    );
+
+    const stats = {
+      totalDevisItems,
+      totalBLItems,
+      totalFactureItems,
+      totalDocuments: totalDevisItems + totalBLItems + totalFactureItems,
+      totalQuantity: {
+        devis: devisQtyResult || 0,
+        bonLivraisons: blQtyResult || 0,
+        factures: factureQtyResult || 0,
+        total: (devisQtyResult || 0) + (blQtyResult || 0) + (factureQtyResult || 0),
+      },
+      totalRevenue: {
+        devis: parseFloat(devisTotalResult || 0),
+        bonLivraisons: parseFloat(blTotalResult || 0),
+        factures: parseFloat(factureTotalResult || 0),
+        total:
+          parseFloat(devisTotalResult || 0) +
+          parseFloat(blTotalResult || 0) +
+          parseFloat(factureTotalResult || 0),
+      },
+      uniqueClientsCount: uniqueClients.length,
+    };
+
+    return res.json({
+      message: "Product history retrieved successfully",
+      produit: {
+        ...produit.toJSON(),
+        statistics: stats,
+      },
+      clients: uniqueClients,
+      documents: {
+        byType: {
+          devis,
+          bonLivraisons,
+          factures,
+        },
+      },
+      pagination: {
+        total: totalCount,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(totalCount / limit),
+      },
+      filters: {
+        documentType,
+        startDate,
+        endDate,
+        sortBy,
+        sortOrder,
+      },
+    });
+  } catch (err) {
+    console.error("Error in getProductHistory:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   createProduit,
   getAllProduits,
@@ -844,4 +1240,5 @@ module.exports = {
   searchProduits,
   getProduitStats,
   getProduitsByFornisseur,
+  getProductHistory,
 };

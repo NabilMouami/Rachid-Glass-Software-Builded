@@ -10,6 +10,7 @@ const {
   searchProduits,
   getProduitStats,
   getProduitsByFornisseur,
+  getProductHistory,
 } = require("../controllers/produitController");
 // const { authenticateToken } = require("../middleware/authMiddleware");
 
@@ -21,6 +22,7 @@ router.post("/", createProduit);
 router.get("/", getAllProduits);
 router.get("/search", searchProduits);
 router.get("/stats", getProduitStats);
+router.get("/:id/history", getProductHistory); // Get product history (Devis, BL, Factures, Clients)
 router.get("/:id", getProduitById);
 router.put("/:id", updateProduit);
 router.delete("/:id", deleteProduit);
