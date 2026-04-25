@@ -460,15 +460,6 @@ const updateBonLivraison = async (req, res) => {
           designation: item.designation,
         });
 
-        // Calculate total_ligne for each item
-        const total_ligne =
-          (parseFloat(item.quantite) || 0) *
-            (parseFloat(item.v1) || 1) *
-            (parseFloat(item.v2) || 1) *
-            (parseFloat(item.v3) || 1) *
-            (parseFloat(item.prix_unitaire) || 0) -
-          (parseFloat(item.remise_ligne) || 0);
-
         return {
           id: item.id || null,
           produit_id: item.produit_id || null,
@@ -477,7 +468,7 @@ const updateBonLivraison = async (req, res) => {
           v2: parseFloat(item.v2) || 1,
           v3: parseFloat(item.v3) || 1,
           prix_unitaire: parseFloat(item.prix_unitaire) || 0,
-          total_ligne: Math.max(0, total_ligne),
+          total_ligne: parseFloat(item.total_ligne) || 0,
           remise_ligne: parseFloat(item.remise_ligne) || 0,
           deliveredQuantity: parseFloat(item.deliveredQuantity) || parseFloat(item.quantite) || 0,
           designation: item.designation || null,

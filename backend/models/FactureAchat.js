@@ -45,8 +45,10 @@ FactureAchat.init(
       allowNull: true,
       field: "supplier_email",
       validate: {
-        isEmail: {
-          msg: "L'email du fournisseur n'est pas valide",
+        isValidEmail(value) {
+          if (value && value.trim() !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            throw new Error("L'email du fournisseur n'est pas valide");
+          }
         },
       },
     },

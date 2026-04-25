@@ -552,8 +552,7 @@ const getClientHistory = async (req, res) => {
       }),
       totalFactures: await Facture.count({ where: { client_id: id } }),
       totalAmount: {
-        devis:
-          (await Devis.sum("total", { where: { client_id: id } })) || 0,
+        devis: (await Devis.sum("total", { where: { client_id: id } })) || 0,
         bonLivraisons:
           (await BonLivraison.sum("total", {
             where: { client_id: id },
@@ -1066,7 +1065,14 @@ const getClientProducts = async (req, res) => {
     const { id } = req.params;
     const { search, documentType, startDate, endDate } = req.query;
 
-    console.log("=== getClientProducts called for client:", id, "startDate:", startDate, "endDate:", endDate);
+    console.log(
+      "=== getClientProducts called for client:",
+      id,
+      "startDate:",
+      startDate,
+      "endDate:",
+      endDate,
+    );
 
     const client = await Client.findByPk(id, {
       attributes: ["id", "nom_complete", "telephone", "ville"],
@@ -1088,7 +1094,7 @@ const getClientProducts = async (req, res) => {
       console.log(`Processing ${items.length} items for type: ${type}`);
       let skipped = 0;
       let processed = 0;
-      
+
       items.forEach((item) => {
         // Skip items without produit_id
         if (!item.produit_id) {
@@ -1098,7 +1104,8 @@ const getClientProducts = async (req, res) => {
 
         const productId = item.produit_id;
         const docDate = item.issue_date;
-        const docNum = item.devis_number || item.delivery_number || item.invoice_number;
+        const docNum =
+          item.devis_number || item.delivery_number || item.invoice_number;
         const docId = item.devis_id || item.bon_livraison_id || item.facture_id;
 
         // Create produit object from raw results
@@ -1125,8 +1132,10 @@ const getClientProducts = async (req, res) => {
         p.totalQuantity += Number(item.quantite || 0);
         p.totalAmount += Number(item.total_ligne || 0);
 
-        if (docDate && (!p.firstPurchase || docDate < p.firstPurchase)) p.firstPurchase = docDate;
-        if (docDate && (!p.lastPurchase || docDate > p.lastPurchase)) p.lastPurchase = docDate;
+        if (docDate && (!p.firstPurchase || docDate < p.firstPurchase))
+          p.firstPurchase = docDate;
+        if (docDate && (!p.lastPurchase || docDate > p.lastPurchase))
+          p.lastPurchase = docDate;
 
         p.documents.push({
           type,
@@ -1154,7 +1163,7 @@ const getClientProducts = async (req, res) => {
         WHERE d.client_id = ?
       `;
       const devisParams = [id];
-      
+
       if (Object.keys(dateFilter).length > 0) {
         if (dateFilter.gte) {
           devisQuery += ` AND d.issue_date >= ?`;
@@ -1165,7 +1174,7 @@ const getClientProducts = async (req, res) => {
           devisParams.push(dateFilter.lte);
         }
       }
-      
+
       const devisProducts = await sequelize.query(devisQuery, {
         replacements: devisParams,
         type: sequelize.QueryTypes.SELECT,
@@ -1187,7 +1196,7 @@ const getClientProducts = async (req, res) => {
         WHERE bl.client_id = ?
       `;
       const blParams = [id];
-      
+
       if (Object.keys(dateFilter).length > 0) {
         if (dateFilter.gte) {
           blQuery += ` AND bl.issue_date >= ?`;
@@ -1198,7 +1207,7 @@ const getClientProducts = async (req, res) => {
           blParams.push(dateFilter.lte);
         }
       }
-      
+
       const blProducts = await sequelize.query(blQuery, {
         replacements: blParams,
         type: sequelize.QueryTypes.SELECT,
@@ -1219,7 +1228,7 @@ const getClientProducts = async (req, res) => {
         WHERE f.client_id = ?
       `;
       const factureParams = [id];
-      
+
       if (Object.keys(dateFilter).length > 0) {
         if (dateFilter.gte) {
           factureQuery += ` AND f.issue_date >= ?`;
@@ -1230,7 +1239,7 @@ const getClientProducts = async (req, res) => {
           factureParams.push(dateFilter.lte);
         }
       }
-      
+
       const factureProducts = await sequelize.query(factureQuery, {
         replacements: factureParams,
         type: sequelize.QueryTypes.SELECT,
@@ -1358,26 +1367,33 @@ const getClientProductHistoryByReference = async (req, res) => {
     // Helper function to build date where clause
     const buildDateWhere = (baseWhere) => {
       const hasDateFilter = dateFilter[Op.gte] || dateFilter[Op.lte];
-      
+
       if (hasDateFilter) {
         // Use model attribute name (issueDate), not database field (issue_date)
         const where = { ...baseWhere };
-        
+
         if (dateFilter[Op.gte]) {
           where.issueDate = { [Op.gte]: dateFilter[Op.gte] };
         }
         if (dateFilter[Op.lte]) {
-          where.issueDate = { 
+          where.issueDate = {
             ...where.issueDate,
-            [Op.lte]: dateFilter[Op.lte] 
+            [Op.lte]: dateFilter[Op.lte],
           };
         }
-        
-        console.log("Built where clause:", JSON.stringify(where, (key, value) => {
-          if (typeof value === 'symbol') return value.toString();
-          return value;
-        }, 2));
-        
+
+        console.log(
+          "Built where clause:",
+          JSON.stringify(
+            where,
+            (key, value) => {
+              if (typeof value === "symbol") return value.toString();
+              return value;
+            },
+            2,
+          ),
+        );
+
         return where;
       }
       return baseWhere;
@@ -1395,11 +1411,18 @@ const getClientProductHistoryByReference = async (req, res) => {
     /* ===================== DEVIS ===================== */
     if (!documentType || documentType === "devis") {
       const devisWhereClause = buildDateWhere({ client_id: id });
-      console.log("Devis where clause:", JSON.stringify(devisWhereClause, (k, v) => {
-        if (typeof v === 'symbol') return v.toString();
-        return v;
-      }, 2));
-      
+      console.log(
+        "Devis where clause:",
+        JSON.stringify(
+          devisWhereClause,
+          (k, v) => {
+            if (typeof v === "symbol") return v.toString();
+            return v;
+          },
+          2,
+        ),
+      );
+
       devisProducts = await DevisItem.findAll({
         include: [
           {
@@ -1423,7 +1446,10 @@ const getClientProductHistoryByReference = async (req, res) => {
       totalCount += devisProducts.length;
       console.log("Devis products found:", devisProducts.length);
       if (devisProducts.length > 0) {
-        console.log("First Devis item date:", JSON.stringify(devisProducts[0].devis?.issueDate));
+        console.log(
+          "First Devis item date:",
+          JSON.stringify(devisProducts[0].devis?.issueDate),
+        );
       }
     }
 
@@ -1435,12 +1461,7 @@ const getClientProductHistoryByReference = async (req, res) => {
             model: BonLivraison,
             as: "bonLivraison",
             where: buildDateWhere({ client_id: id }),
-            attributes: [
-              "deliveryNumber",
-              "issueDate",
-              "status",
-              "total",
-            ],
+            attributes: ["deliveryNumber", "issueDate", "status", "total"],
             required: true,
           },
           produitInclude,
@@ -1500,7 +1521,7 @@ const getClientProductHistoryByReference = async (req, res) => {
         produit: item.produit,
       };
 
-    if (type === "devis") {
+      if (type === "devis") {
         return {
           ...base,
           document: {
@@ -1653,17 +1674,30 @@ const getClientProductHistoryByReference = async (req, res) => {
 const getClientPaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { includeDetails = false } = req.query;
+    const { includeDetails = false, includeAll = false } = req.query;
 
     console.log(`=== PAYMENT STATUS for client ${id} ===`);
 
-    const UNPAID_STATUSES = ["brouillon", "partiellement_payée"];
+    // Include both unpaid statuses or all statuses based on query param
+    const ALL_STATUSES = [
+      "brouillon",
+      "envoyée",
+      "payée",
+      "partiellement_payée",
+      "en_retard",
+      "annulée",
+      "en_attente",
+    ];
+    const statusFilter =
+      includeAll === "true"
+        ? ALL_STATUSES
+        : ["brouillon", "partiellement_payée"];
 
     // ------------------ BonLivraison (UNPAID ONLY)
     const bonLivraisons = await BonLivraison.findAll({
       where: {
         client_id: id,
-        status: { [Op.in]: UNPAID_STATUSES },
+        status: { [Op.in]: statusFilter },
       },
       include: [
         {
@@ -1713,7 +1747,7 @@ const getClientPaymentStatus = async (req, res) => {
     const factures = await Facture.findAll({
       where: {
         client_id: id,
-        status: { [Op.in]: UNPAID_STATUSES },
+        status: { [Op.in]: statusFilter },
       },
       include: [
         {
@@ -1775,13 +1809,17 @@ const getClientPaymentStatus = async (req, res) => {
 
       if (type === "bon-livraison") {
         totalPaid = parseFloat(doc.advancement) || 0;
-        totalRemaining = parseFloat(doc.remainingAmount) || (montantTTC - totalPaid);
-        console.log(`  From BL: advancement=${doc.advancement}, remainingAmount=${doc.remainingAmount}`);
+        totalRemaining =
+          parseFloat(doc.remainingAmount) || montantTTC - totalPaid;
+        console.log(
+          `  From BL: advancement=${doc.advancement}, remainingAmount=${doc.remainingAmount}`,
+        );
       }
 
       if (type === "facture") {
         totalPaid = parseFloat(doc.advancement) || 0;
-        totalRemaining = parseFloat(doc.remainingAmount) || (montantTTC - totalPaid);
+        totalRemaining =
+          parseFloat(doc.remainingAmount) || montantTTC - totalPaid;
         console.log(
           `  From Facture: advancement=${doc.advancement}, remainingAmount=${doc.remainingAmount}`,
         );
@@ -2159,7 +2197,7 @@ const getClientProductsByDateRange = async (req, res) => {
         produit: item.produit,
       };
 
-    if (type === "devis") {
+      if (type === "devis") {
         return {
           ...base,
           document: {

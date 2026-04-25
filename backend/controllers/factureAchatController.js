@@ -437,6 +437,8 @@ const updateFactureAchat = async (req, res) => {
           ? lignes
           : null;
 
+    console.log("📦 itemsToProcess:", JSON.stringify(itemsToProcess, null, 2));
+
     let calculatedSubTotal = subTotal;
     if (!calculatedSubTotal && itemsToProcess) {
       calculatedSubTotal = itemsToProcess.reduce((sum, item) => {
@@ -532,7 +534,7 @@ const updateFactureAchat = async (req, res) => {
     if (itemsToProcess) {
       console.log("📝 Updating FactureAchatProduit items...");
 
-      // First, revert stock changes from old items
+      // First, revert stock changes from old items (subtract what was added before)
       const oldItems = await FactureAchatProduit.findAll({
         where: { facture_achat_id: factureAchat.id },
         transaction,
@@ -546,13 +548,14 @@ const updateFactureAchat = async (req, res) => {
           const newStock =
             parseFloat(produit.surface) - parseFloat(oldItem.quantite);
           await Produit.update(
-            { stock: Math.max(0, newStock) },
+            { surface: Math.max(0, newStock) },
             {
               where: { id: oldItem.produit_id },
               transaction,
               hooks: false,
             },
           );
+          console.log(`📉 ${produit.reference}: -${parseFloat(oldItem.quantite)} m² (reverted)`);
         }
       }
 
@@ -586,25 +589,28 @@ const updateFactureAchat = async (req, res) => {
 
       await FactureAchatProduit.bulkCreate(preparedItems, { transaction });
 
-      // Update stock and prix_achat with new items
+      // Update surface and prix_achat with new items (ADD stock for purchases)
+      console.log("🔄 Updating surface for new items...");
       for (const item of preparedItems) {
+        console.log(`🔍 Processing item:`, item);
         const produit = await Produit.findByPk(item.produit_id, {
           transaction,
         });
         if (produit) {
-          const newStock =
-            parseFloat(produit.surface) + parseFloat(item.quantite);
+          const oldSurface = parseFloat(produit.surface) || 0;
+          const qtyToAdd = parseFloat(item.quantite) || 0;
+          const newStock = oldSurface + qtyToAdd;
           await Produit.update(
-            { stock: newStock, prix_achat: item.prix_unitaire },
+            { surface: newStock, prix_achat: item.prix_unitaire },
             {
               where: { id: item.produit_id },
               transaction,
               hooks: false,
             },
           );
-          console.log(
-            `✅ Produit ${produit.reference} mis à jour - stock: ${newStock}, prix_achat: ${item.prix_unitaire}`,
-          );
+          console.log(`📈 ${produit.reference}: surface ${oldSurface} + ${qtyToAdd} = ${newStock}`);
+        } else {
+          console.log(`⚠️ Produit not found for id: ${item.produit_id}`);
         }
       }
 

@@ -83,6 +83,17 @@ const createFacture = async (req, res) => {
 
     console.log("✅ All validations passed");
 
+    // Generate or use provided invoice number
+    console.log("🔢 Handling invoice number...");
+    let invoiceNumber;
+    if (req.body.invoiceNumber && req.body.invoiceNumber.trim() !== "") {
+      invoiceNumber = req.body.invoiceNumber.trim();
+      console.log("📋 Using provided invoice number:", invoiceNumber);
+    } else {
+      invoiceNumber = await generateInvoiceNumber();
+      console.log("📋 Generated invoice number:", invoiceNumber);
+    }
+
     // VÉRIFICATION DES STOCKS (SURFACES)
     console.log("🔍 Vérification des surfaces disponibles...");
     for (const item of items) {
@@ -93,7 +104,8 @@ const createFacture = async (req, res) => {
       }
 
       // La qty représente directement la surface en m² à diminuer
-      const qtyValue = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
+      const qtyValue =
+        parseFloat(item.quantity) || parseFloat(item.surface) || 1;
 
       console.log(`📐 Produit ${produit.reference}:`, {
         qty_surface: qtyValue,
@@ -110,15 +122,11 @@ const createFacture = async (req, res) => {
     }
     console.log("✅ Surfaces disponibles suffisantes");
 
-    // Generate invoice number
-    console.log("🔢 Generating invoice number...");
-    const invoiceNumber = await generateInvoiceNumber();
-    console.log("📋 Generated invoice number:", invoiceNumber);
-
     // Prepare items with correct field names for FactureProduit
     console.log("🧮 Preparing items...");
     const preparedItems = items.map((item, index) => {
-      const quantite = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
+      const quantite =
+        parseFloat(item.quantity) || parseFloat(item.surface) || 1;
       const prixUnitaire = parseFloat(item.unitPrice) || 0;
       const totalLigne = parseFloat(item.totalPrice) || prixUnitaire * quantite;
 
@@ -196,7 +204,8 @@ const createFacture = async (req, res) => {
       paymentType: paymentType || "non_paye",
       tvaRate: calculatedTvaRate,
       tvaAmount: calculatedTvaAmount,
-      includeTvaInPrice: includeTvaInPrice !== undefined ? includeTvaInPrice : true,
+      includeTvaInPrice:
+        includeTvaInPrice !== undefined ? includeTvaInPrice : true,
       advancement: totalAdvancement,
       remainingAmount: calculatedRemainingAmount,
       subTotal: calculatedSubTotal,
@@ -261,7 +270,8 @@ const createFacture = async (req, res) => {
       }
 
       // La qty représente directement la surface en m² à diminuer
-      const qtyValue = parseFloat(item.quantity) || parseFloat(item.surface) || 1;
+      const qtyValue =
+        parseFloat(item.quantity) || parseFloat(item.surface) || 1;
       const surfaceActuelle = parseFloat(produit.surface) || 0;
       const nouvelleSurface = Math.max(0, surfaceActuelle - qtyValue);
 
@@ -818,11 +828,12 @@ const updateFacture = async (req, res) => {
     console.log("✅ Facture updated! ID:", facture.id);
 
     // Update items ONLY if they were provided (accept both 'items' and 'lignes' keys)
-    const itemsToProcess = (items && Array.isArray(items) && items.length > 0)
-      ? items
-      : (lignes && Array.isArray(lignes) && lignes.length > 0)
-        ? lignes
-        : null;
+    const itemsToProcess =
+      items && Array.isArray(items) && items.length > 0
+        ? items
+        : lignes && Array.isArray(lignes) && lignes.length > 0
+          ? lignes
+          : null;
 
     if (itemsToProcess) {
       console.log("📝 Updating FactureProduit items...");
@@ -848,6 +859,74 @@ const updateFacture = async (req, res) => {
 
       await FactureProduit.bulkCreate(preparedItems, { transaction });
       console.log("Created " + preparedItems.length + " FactureProduit items");
+
+      // =============================================
+      // GÉRER LA SURFACE DES PRODUITS LORS DE LA MISE À JOUR
+      // =============================================
+
+      // 1. RESTAURER LA SURFACE POUR LES ANCIENS ARTICLES
+      if (facture.lignes && facture.lignes.length > 0) {
+        console.log(
+          "📈 Restauration des surfaces pour les anciens articles...",
+        );
+        for (const oldItem of facture.lignes) {
+          if (oldItem.produit_id) {
+            const oldProduit = await Produit.findByPk(oldItem.produit_id, {
+              transaction,
+              lock: transaction.LOCK.UPDATE,
+            });
+            if (oldProduit) {
+              const oldQty = parseFloat(oldItem.quantite) || 0;
+              const surfaceActuelle = parseFloat(oldProduit.surface) || 0;
+              const nouvelleSurface = surfaceActuelle + oldQty;
+
+              await Produit.update(
+                { surface: nouvelleSurface },
+                {
+                  where: { id: oldItem.produit_id },
+                  transaction,
+                  hooks: false,
+                },
+              );
+
+              console.log(
+                `📈 ${oldProduit.reference}: +${oldQty.toFixed(4)} m² (surface restaurée)`,
+              );
+            }
+          }
+        }
+      }
+
+      // 2. DIMINUER LA SURFACE POUR LES NOUVEAUX ARTICLES
+      if (itemsToProcess && itemsToProcess.length > 0) {
+        console.log("📉 Diminution des surfaces pour les nouveaux articles...");
+        for (const item of itemsToProcess) {
+          if (item.produit_id || item.productId) {
+            const produitId = item.produit_id || item.productId;
+            const produit = await Produit.findByPk(produitId, {
+              transaction,
+              lock: transaction.LOCK.UPDATE,
+            });
+
+            if (produit) {
+              const qtyValue = parseFloat(item.quantite || item.quantity) || 0;
+              const surfaceActuelle = parseFloat(produit.surface) || 0;
+              const nouvelleSurface = Math.max(0, surfaceActuelle - qtyValue);
+
+              await Produit.update(
+                { surface: nouvelleSurface },
+                { where: { id: produitId }, transaction, hooks: false },
+              );
+
+              console.log(
+                `📉 ${produit.reference}: -${qtyValue.toFixed(4)} m² (surface diminuée)`,
+              );
+            }
+          }
+        }
+      }
+
+      console.log("✅ Gestion des surfaces terminée");
     }
 
     // Update advancements if provided
