@@ -1825,7 +1825,20 @@ const getClientPaymentStatus = async (req, res) => {
         );
       }
 
-      const paymentStatus = totalPaid > 0 ? "partiellement_payée" : "brouillon";
+      let paymentStatus = doc.status;
+
+      // Override status based on actual payments if there are any
+      if (totalPaid >= montantTTC && montantTTC > 0) {
+        paymentStatus = "payée";
+      } else if (totalPaid > 0 && totalPaid < montantTTC) {
+        paymentStatus = "partiellement_payée";
+      } else if (
+        totalPaid === 0 &&
+        doc.status !== "payée" &&
+        doc.status !== "annulée"
+      ) {
+        paymentStatus = "brouillon";
+      }
 
       console.log(
         `  Result: totalPaid=${totalPaid}, totalRemaining=${totalRemaining}, paymentStatus=${paymentStatus}`,
@@ -1868,8 +1881,12 @@ const getClientPaymentStatus = async (req, res) => {
       { totalAmount: 0, totalPaid: 0, totalRemaining: 0, count: 0 },
     );
 
-    const overallStatus =
-      totals.totalPaid > 0 ? "partiellement_payée" : "brouillon";
+    let overallStatus = "brouillon";
+    if (totals.totalPaid >= totals.totalAmount && totals.totalAmount > 0) {
+      overallStatus = "payée";
+    } else if (totals.totalPaid > 0) {
+      overallStatus = "partiellement_payée";
+    }
 
     console.log(`\n=== FINAL RESULTS ===`);
     console.log(`Total documents: ${totals.count}`);
@@ -1890,6 +1907,7 @@ const getClientPaymentStatus = async (req, res) => {
           partiellement_payée: allDocuments.filter(
             (d) => d.paymentStatus === "partiellement_payée",
           ).length,
+          payée: allDocuments.filter((d) => d.paymentStatus === "payée").length,
         },
       },
       documents: allDocuments.sort(

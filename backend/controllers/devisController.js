@@ -15,23 +15,34 @@ const fs = require("fs");
 
 const generateDevisNumber = async () => {
   const prefix = "DV";
+
+  // Order by devisNumber DESC (lexicographic works for zero-padded numbers like DV0001, DV0002…)
   const lastDevis = await Devis.findOne({
     where: {
       devisNumber: {
         [Op.like]: `${prefix}%`,
       },
     },
-    order: [["createdAt", "DESC"]],
+    order: [["devisNumber", "DESC"]],
   });
 
   let sequence = 1;
   if (lastDevis) {
-    const lastNum = lastDevis.devisNumber;
-    const lastSeq = parseInt(lastNum.slice(-4)) || 0;
+    const lastNum = lastDevis.devisNumber; // e.g. "DV0003"
+    const lastSeq = parseInt(lastNum.replace(prefix, ""), 10) || 0;
     sequence = lastSeq + 1;
   }
 
-  return `${prefix}${sequence.toString().padStart(4, "0")}`;
+  // Safety: keep incrementing until we find a number not already taken
+  let candidate = `${prefix}${sequence.toString().padStart(4, "0")}`;
+  let exists = await Devis.findOne({ where: { devisNumber: candidate } });
+  while (exists) {
+    sequence += 1;
+    candidate = `${prefix}${sequence.toString().padStart(4, "0")}`;
+    exists = await Devis.findOne({ where: { devisNumber: candidate } });
+  }
+
+  return candidate;
 };
 
 const createDevis = async (req, res) => {

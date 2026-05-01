@@ -4,29 +4,38 @@ const FactureProduit = require("../models/FactureProduit");
 const Advancement = require("../models/Advancement");
 const { Op } = require("sequelize");
 const { Client, Produit, BonLivraison, User } = require("../models");
+const fs = require("fs");
 
 const generateInvoiceNumber = async () => {
   const prefix = "FAC";
-  const prefixWithYear = `${prefix}`;
 
+  // Order by invoiceNumber DESC (lexicographic works for zero-padded numbers like FAC-0001, FAC-0002…)
   const lastFacture = await Facture.findOne({
     where: {
       invoiceNumber: {
-        [Op.like]: `${prefixWithYear}%`,
+        [Op.like]: `${prefix}%`,
       },
     },
-    order: [["createdAt", "DESC"]],
+    order: [["invoiceNumber", "DESC"]],
   });
 
   let sequence = 1;
   if (lastFacture) {
-    const lastNum = lastFacture.invoiceNumber;
-    const lastSeq = parseInt(lastNum.slice(-4)) || 0;
+    const lastNum = lastFacture.invoiceNumber; // e.g. "FAC-0003"
+    const lastSeq = parseInt(lastNum.replace(`${prefix}-`, ""), 10) || 0;
     sequence = lastSeq + 1;
   }
 
-  // Format: FAC23-000001 (FAC + année + tiret + séquence sur 6 chiffres)
-  return `${prefixWithYear}-${sequence.toString().padStart(4, "0")}`;
+  // Safety: keep incrementing until we find a number not already taken
+  let candidate = `${prefix}-${sequence.toString().padStart(4, "0")}`;
+  let exists = await Facture.findOne({ where: { invoiceNumber: candidate } });
+  while (exists) {
+    sequence += 1;
+    candidate = `${prefix}-${sequence.toString().padStart(4, "0")}`;
+    exists = await Facture.findOne({ where: { invoiceNumber: candidate } });
+  }
+
+  return candidate;
 };
 
 const createFacture = async (req, res) => {
@@ -701,6 +710,55 @@ const getFactureStats = async (req, res) => {
   }
 };
 
+const uploadFacturePDF = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "No PDF file uploaded" });
+    }
+
+    const facture = await Facture.findByPk(id);
+    if (!facture) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(404).json({ message: "Facture non trouvée" });
+    }
+
+    // If your DB/model has pdfPath/pdfUploadedAt columns, we update them.
+    // If not, we still keep the file and just return its path.
+    try {
+      if (facture.pdfPath && fs.existsSync(facture.pdfPath)) {
+        fs.unlinkSync(facture.pdfPath);
+      }
+      facture.pdfPath = req.file.path;
+      facture.pdfUploadedAt = new Date();
+      await facture.save();
+    } catch (e) {
+      console.warn(
+        "PDF saved on disk but facture pdfPath/pdfUploadedAt not persisted:",
+        e.message,
+      );
+    }
+
+    return res.json({
+      message: "PDF uploaded successfully",
+      pdfPath: req.file.path,
+      filename: req.file.filename,
+    });
+  } catch (err) {
+    console.error("Upload facture PDF error:", err);
+
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    return res.status(500).json({
+      message: "Server error during PDF upload",
+      error: err.message,
+    });
+  }
+};
+
 const updateFacture = async (req, res) => {
   console.log("🚀 UPDATE FACTURE - START");
   console.log("📦 Request body:", JSON.stringify(req.body, null, 2));
@@ -992,4 +1050,5 @@ module.exports = {
   deleteFacture,
   getFacturesByClient,
   getFactureStats,
+  uploadFacturePDF,
 };

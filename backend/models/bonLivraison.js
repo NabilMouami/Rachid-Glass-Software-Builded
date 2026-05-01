@@ -94,6 +94,11 @@ BonLivraison.init(
       defaultValue: "non_paye",
       field: "payment_type", // Explicit column name
     },
+    paymentDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "payment_date",
+    },
     advancement: {
       type: DataTypes.FLOAT(10, 2),
       allowNull: false,
@@ -188,6 +193,11 @@ BonLivraison.init(
       type: DataTypes.STRING(100),
       allowNull: true,
       field: "prepared_by",
+    },
+    validatedBy: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      field: "validated_by",
     },
     deliveredBy: {
       type: DataTypes.STRING(100),

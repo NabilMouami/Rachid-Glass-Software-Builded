@@ -156,6 +156,7 @@ BonLivraison.belongsToMany(Produit, {
   as: "produits",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 Produit.belongsToMany(BonLivraison, {
@@ -165,6 +166,7 @@ Produit.belongsToMany(BonLivraison, {
   as: "bonLivraisons",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 // Direct relationships for BonLivraisonProduit
@@ -282,6 +284,7 @@ Facture.belongsToMany(Produit, {
   as: "produits",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 Produit.belongsToMany(Facture, {
@@ -291,6 +294,7 @@ Produit.belongsToMany(Facture, {
   as: "factures",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 // Direct relationships for FactureProduit
@@ -354,6 +358,7 @@ FactureAchat.belongsToMany(Produit, {
   as: "produitsAchat",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 Produit.belongsToMany(FactureAchat, {
@@ -363,6 +368,7 @@ Produit.belongsToMany(FactureAchat, {
   as: "facturesAchat",
   onDelete: "CASCADE",
   onUpdate: "CASCADE",
+  uniqueKey: false,
 });
 
 // Direct relationships for FactureAchatProduit
