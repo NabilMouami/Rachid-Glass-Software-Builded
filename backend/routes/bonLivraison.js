@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createBonLivraison,
   getBonLivraisons,
+  getBonLivraisonsByDate,
   getBonLivraisonById,
   updateBonLivraison,
   deleteBonLivraison,
@@ -15,6 +16,8 @@ router.post("/", createBonLivraison);
 
 // Get all delivery notes
 router.get("/", getBonLivraisons);
+
+router.get("/by-date", getBonLivraisonsByDate);
 
 // Get a specific delivery note by ID
 router.get("/:id", getBonLivraisonById);
