@@ -356,7 +356,8 @@ const getBonLivraisonsByDate = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
-    const where = {};
+    let whereCondition = {};
+    let advancementWhereCondition = {};
 
     if (startDate || endDate) {
       const dateFilter = {};
@@ -364,16 +365,44 @@ const getBonLivraisonsByDate = async (req, res) => {
       if (startDate) {
         dateFilter[Op.gte] = new Date(`${startDate}T00:00:00.000Z`);
       }
-
       if (endDate) {
         dateFilter[Op.lte] = new Date(`${endDate}T23:59:59.999Z`);
       }
 
-      where[Op.or] = [{ createdAt: dateFilter }, { paymentDate: dateFilter }];
+      // Step 1: Find all bon_livraison_id from advancements in the date range
+      const advancementMatches = await Advancement.findAll({
+        where: {
+          paymentDate: dateFilter,
+          bon_livraison_id: { [Op.not]: null },
+        },
+        attributes: ["bon_livraison_id"],
+        group: ["bon_livraison_id"],
+        raw: true,
+      });
+
+      const matchedIds = advancementMatches.map((a) => a.bon_livraison_id);
+
+      console.log("🔍 Advancement matched IDs:", matchedIds);
+
+      // Step 2: Build OR condition for BonLivraison
+      whereCondition = {
+        [Op.or]: [
+          { createdAt: dateFilter },
+          { paymentDate: dateFilter },
+          ...(matchedIds.length > 0
+            ? [{ id: { [Op.in]: matchedIds } }]
+            : []),
+        ],
+      };
+
+      // Step 3: Only include advancements that match the date range
+      advancementWhereCondition = {
+        paymentDate: dateFilter,
+      };
     }
 
     const bonLivraisons = await BonLivraison.findAll({
-      where,
+      where: whereCondition,
       attributes: [
         "id",
         "deliveryNumber",
@@ -387,10 +416,46 @@ const getBonLivraisonsByDate = async (req, res) => {
         "paymentType",
         "createdAt",
       ],
+      include: [
+        {
+          model: Advancement,
+          as: "advancements",
+          required: false,
+          where: Object.keys(advancementWhereCondition).length > 0
+            ? advancementWhereCondition
+            : undefined,  // ✅ only filter advancements when date range is provided
+          attributes: ["id", "amount", "paymentDate", "paymentMethod"],
+        },
+      ],
       order: [["createdAt", "DESC"]],
     });
 
-    return res.json(bonLivraisons);
+    // Step 4: Calculate the actual amount paid on the filtered date range per BonLivraison
+    const result = bonLivraisons.map((bon) => {
+      const bonJson = bon.toJSON();
+
+      // Sum only the advancements that matched the date filter
+      const filteredAdvancementTotal = bonJson.advancements.reduce(
+        (sum, adv) => sum + parseFloat(adv.amount || 0),
+        0
+      );
+
+      // If the bon itself was fully paid in the date range (paymentDate matches),
+      // and has no advancements, use the total directly
+      const paidOnDate =
+        bonJson.advancements.length > 0
+          ? filteredAdvancementTotal  // partial payments → sum of matched advancements
+          : bonJson.paymentDate       // fully paid → use total
+          ? bonJson.total
+          : 0;
+
+      return {
+        ...bonJson,
+        paidOnDate, // ✅ amount actually paid in the requested date range
+      };
+    });
+
+    return res.json(result);
   } catch (err) {
     console.error("Get delivery notes by date error:", err);
     return res.status(500).json({

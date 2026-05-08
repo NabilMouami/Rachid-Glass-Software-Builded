@@ -1798,51 +1798,28 @@ const getClientPaymentStatus = async (req, res) => {
     const calculateDocumentStatus = (doc, type) => {
       const montantTTC = parseFloat(doc.total || doc.totalTTC) || 0;
 
-      let totalPaid = 0;
-      let totalRemaining = 0;
-
-      console.log(
-        `\nCalculating status for ${type} ${doc.deliveryNumber || doc.invoiceNumber}:`,
-      );
-      console.log(`  Montant TTC: ${montantTTC}`);
-      console.log(`  Original status: ${doc.status}`);
-
-      if (type === "bon-livraison") {
-        totalPaid = parseFloat(doc.advancement) || 0;
-        totalRemaining =
-          parseFloat(doc.remainingAmount) || montantTTC - totalPaid;
-        console.log(
-          `  From BL: advancement=${doc.advancement}, remainingAmount=${doc.remainingAmount}`,
-        );
-      }
-
-      if (type === "facture") {
-        totalPaid = parseFloat(doc.advancement) || 0;
-        totalRemaining =
-          parseFloat(doc.remainingAmount) || montantTTC - totalPaid;
-        console.log(
-          `  From Facture: advancement=${doc.advancement}, remainingAmount=${doc.remainingAmount}`,
-        );
-      }
+      let totalPaid = parseFloat(doc.advancement) || 0;
+      let totalRemaining =
+        parseFloat(doc.remainingAmount) || Math.max(0, montantTTC - totalPaid);
 
       let paymentStatus = doc.status;
 
-      // Override status based on actual payments if there are any
-      if (totalPaid >= montantTTC && montantTTC > 0) {
+      // FIX: When status is already "payée", trust it and set totalPaid = montantTTC
+      if (doc.status === "payée") {
+        totalPaid = montantTTC;
+        totalRemaining = 0;
         paymentStatus = "payée";
+      } else if (totalPaid >= montantTTC && montantTTC > 0) {
+        paymentStatus = "payée";
+        totalRemaining = 0;
       } else if (totalPaid > 0 && totalPaid < montantTTC) {
         paymentStatus = "partiellement_payée";
-      } else if (
-        totalPaid === 0 &&
-        doc.status !== "payée" &&
-        doc.status !== "annulée"
-      ) {
+        totalRemaining = montantTTC - totalPaid;
+      } else {
         paymentStatus = "brouillon";
+        totalPaid = 0;
+        totalRemaining = montantTTC;
       }
-
-      console.log(
-        `  Result: totalPaid=${totalPaid}, totalRemaining=${totalRemaining}, paymentStatus=${paymentStatus}`,
-      );
 
       return {
         documentId: doc.id,
@@ -1851,15 +1828,14 @@ const getClientPaymentStatus = async (req, res) => {
         date: doc.issueDate,
         paymentStatus,
         montantTTC,
-        totalPaid,
-        totalRemaining,
-        isPartiallyPaid: totalPaid > 0,
-        isUnpaid: totalPaid === 0,
+        totalPaid, // ← now correct: 772.52 for payée docs
+        totalRemaining, // ← now correct: 0 for payée docs
+        isPartiallyPaid: paymentStatus === "partiellement_payée",
+        isUnpaid: paymentStatus === "brouillon",
         type,
         advancements: includeDetails === "true" ? doc.advancements : undefined,
       };
     };
-
     const processedBL = bonLivraisons.map((bl) =>
       calculateDocumentStatus(bl, "bon-livraison"),
     );
