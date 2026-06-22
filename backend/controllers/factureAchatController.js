@@ -555,7 +555,9 @@ const updateFactureAchat = async (req, res) => {
               hooks: false,
             },
           );
-          console.log(`📉 ${produit.reference}: -${parseFloat(oldItem.quantite)} m² (reverted)`);
+          console.log(
+            `📉 ${produit.reference}: -${parseFloat(oldItem.quantite)} m² (reverted)`,
+          );
         }
       }
 
@@ -608,7 +610,9 @@ const updateFactureAchat = async (req, res) => {
               hooks: false,
             },
           );
-          console.log(`📈 ${produit.reference}: surface ${oldSurface} + ${qtyToAdd} = ${newStock}`);
+          console.log(
+            `📈 ${produit.reference}: surface ${oldSurface} + ${qtyToAdd} = ${newStock}`,
+          );
         } else {
           console.log(`⚠️ Produit not found for id: ${item.produit_id}`);
         }
@@ -706,28 +710,37 @@ const deleteFactureAchat = async (req, res) => {
       });
     }
 
-    // Revert stock changes
-    for (const item of factureAchat.lignes) {
-      const produit = await Produit.findByPk(item.produit_id, {
-        transaction,
-      });
-      if (produit) {
-        const newStock = Math.max(
-          0,
-          parseFloat(produit.surface) - parseFloat(item.quantite),
-        );
+    // Restore surface for all items in the deleted invoice
+    console.log("📈 Restauration des surfaces lors de la suppression...");
+    if (factureAchat.lignes && factureAchat.lignes.length > 0) {
+      for (const item of factureAchat.lignes) {
+        if (!item.produit_id) continue;
+
+        const produit = await Produit.findByPk(item.produit_id, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (!produit) continue;
+
+        const qtyValue = parseFloat(item.quantite) || 0;
+        const surfaceActuelle = parseFloat(produit.surface) || 0;
+        const nouvelleSurface = surfaceActuelle - qtyValue;
+
         await Produit.update(
-          { surface: newStock },
+          { surface: nouvelleSurface },
           {
             where: { id: item.produit_id },
             transaction,
             hooks: false,
           },
         );
+
         console.log(
-          `✅ Stock reverted for product ${produit.reference}: ${newStock}`,
+          `📈 ${produit.reference}: +${qtyValue.toFixed(4)} m² (surface restaurée)`,
         );
       }
+      console.log("✅ Surfaces restaurées");
     }
 
     // Delete associated items

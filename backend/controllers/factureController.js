@@ -201,11 +201,16 @@ const createFacture = async (req, res) => {
     });
 
     // Prepare the data for creating Facture
+    const parsedIssueDate = issueDate ? new Date(issueDate) : new Date();
+    const issueDateValue = isNaN(parsedIssueDate.getTime())
+      ? new Date()
+      : parsedIssueDate;
+
     const createData = {
       invoiceNumber,
       customerName: customerName.trim(),
       customerPhone: customerPhone || null,
-      issueDate: issueDate || new Date(),
+      issueDate: issueDateValue,
       notes,
       status: status || "brouillon",
       discountType: discountType || "fixed",
@@ -595,7 +600,10 @@ const deleteFacture = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const facture = await Facture.findByPk(id, { transaction });
+    const facture = await Facture.findByPk(id, {
+      include: [{ model: FactureProduit, as: "lignes" }],
+      transaction,
+    });
 
     if (!facture) {
       await transaction.rollback();
@@ -603,6 +611,40 @@ const deleteFacture = async (req, res) => {
         success: false,
         message: "Facture non trouvée",
       });
+    }
+
+    // Restore product surface before deleting line items
+    if (facture.lignes && facture.lignes.length > 0) {
+      console.log("📈 Restauration des surfaces lors de la suppression...");
+      for (const item of facture.lignes) {
+        if (!item.produit_id) continue;
+
+        const produit = await Produit.findByPk(item.produit_id, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+
+        if (!produit) continue;
+
+        const qtyValue =
+          parseFloat(item.quantite) || parseFloat(item.surface) || 0;
+        const surfaceActuelle = parseFloat(produit.surface) || 0;
+        const nouvelleSurface = surfaceActuelle + qtyValue;
+
+        await Produit.update(
+          { surface: nouvelleSurface },
+          {
+            where: { id: item.produit_id },
+            transaction,
+            hooks: false,
+          },
+        );
+
+        console.log(
+          `📈 ${produit.reference}: +${qtyValue.toFixed(4)} m² (surface restaurée)`,
+        );
+      }
+      console.log("✅ Surfaces restaurées");
     }
 
     // Delete associated items (cascade should handle this, but we'll do it explicitly)
@@ -720,7 +762,8 @@ const uploadFacturePDF = async (req, res) => {
 
     const facture = await Facture.findByPk(id);
     if (!facture) {
-      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      if (req.file && fs.existsSync(req.file.path))
+        fs.unlinkSync(req.file.path);
       return res.status(404).json({ message: "Facture non trouvée" });
     }
 
