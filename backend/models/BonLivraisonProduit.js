@@ -12,7 +12,7 @@ const BonLivraisonProduit = sequelize.define(
     },
 
     quantite: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
       defaultValue: 1,
     },
