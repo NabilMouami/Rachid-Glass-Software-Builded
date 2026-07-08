@@ -12,6 +12,85 @@ const {
 } = require("../models");
 const { Op } = require("sequelize");
 
+const roundToNextMultipleOfThree = (value) => {
+  const numValue = parseFloat(value);
+  if (isNaN(numValue) || numValue < 3) return 3;
+  if (numValue % 3 === 0) return numValue;
+  return Math.ceil(numValue / 3) * 3;
+};
+
+const calculateMetreLin = (quantite, v1, v2) => {
+  const numV1 = parseFloat(v1) || 0;
+  const numV2 = parseFloat(v2) || 0;
+  if (numV1 === 1 && numV2 === 1) return 0;
+  const calcV1 = roundToNextMultipleOfThree(numV1) / 100;
+  const calcV2 = roundToNextMultipleOfThree(numV2) / 100;
+  const qty = parseFloat(quantite) || 0;
+  return (calcV1 + calcV2) * 2 * qty;
+};
+
+const getMondayOfWeek = (date) => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d);
+  monday.setDate(diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+};
+
+const getPeriodInfo = (date, groupBy = "week") => {
+  const d = new Date(date);
+  if (groupBy === "month") {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("fr-FR", {
+      month: "short",
+      year: "numeric",
+    });
+    return { key, label };
+  }
+
+  const monday = getMondayOfWeek(d);
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  const key = monday.toISOString().slice(0, 10);
+  const fmt = (dt) =>
+    dt.toLocaleDateString("fr-FR", { day: "2-digit", month: "short" });
+  const label = `Sem. ${fmt(monday)} - ${fmt(sunday)} ${sunday.getFullYear()}`;
+  return { key, label };
+};
+
+const buildProductDateFilter = (startDate, endDate) => {
+  const dateFilter = {};
+  if (startDate) {
+    dateFilter[Op.gte] = new Date(`${startDate}T00:00:00.000Z`);
+  }
+  if (endDate) {
+    dateFilter[Op.lte] = new Date(`${endDate}T23:59:59.999Z`);
+  }
+  return dateFilter;
+};
+
+const getFilteredBonLivraisonIds = async (startDate, endDate) => {
+  const dateFilter = buildProductDateFilter(startDate, endDate);
+  if (!startDate && !endDate) return null;
+
+  const rows = await BonLivraison.findAll({
+    where: { issueDate: dateFilter },
+    attributes: ["id"],
+    raw: true,
+  });
+  return rows.map((row) => row.id);
+};
+
+const buildBlProduitWhere = (produitId, filteredBlIds) => {
+  const where = { produit_id: produitId };
+  if (filteredBlIds === null) return where;
+  where.bon_livraison_id =
+    filteredBlIds.length > 0 ? { [Op.in]: filteredBlIds } : -1;
+  return where;
+};
+
 // Create a new produit
 const createProduit = async (req, res) => {
   try {
@@ -852,9 +931,10 @@ const getProductHistory = async (req, res) => {
       startDate,
       endDate,
       documentType,
+      groupBy = "week",
       sortBy = "issueDate",
       sortOrder = "DESC",
-      limit = 50,
+      limit = 10000,
       page = 1,
     } = req.query;
 
@@ -878,15 +958,12 @@ const getProductHistory = async (req, res) => {
     // Calculate offset for pagination
     const offset = (page - 1) * limit;
 
-    // Build date filter
-    const dateFilter = {};
-    if (startDate) {
-      dateFilter[Op.gte] = new Date(startDate);
-    }
-    if (endDate) {
-      dateFilter[Op.lte] = new Date(endDate);
-    }
-    const hasDateFilter = Object.keys(dateFilter).length > 0;
+    // Build date filter (inclusive full days, local time)
+    const dateFilter = buildProductDateFilter(startDate, endDate);
+    const hasDateFilter = !!(startDate || endDate);
+    const periodGroupBy = groupBy === "month" ? "month" : "week";
+    const filteredBlIds = await getFilteredBonLivraisonIds(startDate, endDate);
+    const blProductWhere = buildBlProduitWhere(id, filteredBlIds);
 
     // Initialize arrays for different document types
     let devis = [];
@@ -962,10 +1039,8 @@ const getProductHistory = async (req, res) => {
 
     // ---- BON LIVRAISONS ----
     if (!documentType || documentType === "bon-livraison") {
-      const blProduitWhere = { produit_id: id };
-
       bonLivraisons = await BonLivraisonProduit.findAll({
-        where: blProduitWhere,
+        where: blProductWhere,
         attributes: [
           "id",
           "quantite",
@@ -993,7 +1068,6 @@ const getProductHistory = async (req, res) => {
               "remainingAmount",
               "notes",
             ],
-            where: hasDateFilter ? { issueDate: dateFilter } : undefined,
             required: true,
             include: [
               {
@@ -1017,24 +1091,7 @@ const getProductHistory = async (req, res) => {
         offset: parseInt(offset),
       });
 
-      // Count total BL items for this product
-      const blCountWhere = { produit_id: id };
-      if (hasDateFilter) {
-        const blCountResult = await BonLivraisonProduit.count({
-          where: blCountWhere,
-          include: [
-            {
-              model: BonLivraison,
-              as: "bonLivraison",
-              where: { issueDate: dateFilter },
-              required: true,
-            },
-          ],
-        });
-        totalCount += blCountResult;
-      } else {
-        totalCount += await BonLivraisonProduit.count({ where: blCountWhere });
-      }
+      totalCount += await BonLivraisonProduit.count({ where: blProductWhere });
     }
 
     // ---- FACTURES ----
@@ -1112,84 +1169,140 @@ const getProductHistory = async (req, res) => {
       }
     }
 
-    // ---- STATISTICS ----
-    const totalDevisItems = await DevisItem.count({
-      where: { produit_id: id },
-    });
-    const totalBLItems = await BonLivraisonProduit.count({
-      where: { produit_id: id },
-    });
-    const totalFactureItems = await FactureProduit.count({
-      where: { produit_id: id },
+    // ---- BL STATISTICS & CHART DATA (respects date filter) ----
+    const filteredBLItems = await BonLivraisonProduit.count({
+      where: blProductWhere,
     });
 
-    // Total quantity sold across all document types
-    const devisQtyResult = await DevisItem.sum("quantite", {
-      where: { produit_id: id },
-    });
-    const blQtyResult = await BonLivraisonProduit.sum("quantite", {
-      where: { produit_id: id },
-    });
-    const factureQtyResult = await FactureProduit.sum("quantite", {
-      where: { produit_id: id },
+    const filteredBLQty = await BonLivraisonProduit.sum("quantite", {
+      where: blProductWhere,
     });
 
-    // Total revenue across document types
-    const devisTotalResult = await DevisItem.sum("total_ligne", {
-      where: { produit_id: id },
-    });
-    const blTotalResult = await BonLivraisonProduit.sum("total_ligne", {
-      where: { produit_id: id },
-    });
-    const factureTotalResult = await FactureProduit.sum("total_ligne", {
-      where: { produit_id: id },
+    const filteredBLRevenue = await BonLivraisonProduit.sum("total_ligne", {
+      where: blProductWhere,
     });
 
-    // Unique clients who purchased this product
-    const uniqueClients = await sequelize.query(
-      `SELECT DISTINCT c.id, c.nom_complete, c.telephone, c.ville
-       FROM clients c
-       WHERE c.id IN (
-         SELECT DISTINCT d.client_id FROM devis d
-         INNER JOIN devis_items di ON di.devis_id = d.id
-         WHERE di.produit_id = :productId AND d.client_id IS NOT NULL
-         UNION
-         SELECT DISTINCT bl.client_id FROM bon_livraisons bl
-         INNER JOIN bon_livraison_produits blp ON blp.bon_livraison_id = bl.id
-         WHERE blp.produit_id = :productId AND bl.client_id IS NOT NULL
-         UNION
-         SELECT DISTINCT f.client_id FROM factures f
-         INNER JOIN facture_produits fp ON fp.facture_id = f.id
-         WHERE fp.produit_id = :productId AND f.client_id IS NOT NULL
-       )
-       ORDER BY c.nom_complete ASC`,
-      {
-        replacements: { productId: id },
-        type: sequelize.QueryTypes.SELECT,
-      },
+    const allBLLineItems = await BonLivraisonProduit.findAll({
+      where: blProductWhere,
+      attributes: ["quantite", "total_ligne", "v1", "v2"],
+      include: [
+        {
+          model: BonLivraison,
+          as: "bonLivraison",
+          attributes: ["id", "deliveryNumber", "issueDate"],
+          required: true,
+          include: [
+            {
+              model: Client,
+              as: "client",
+              attributes: ["id", "nom_complete", "telephone", "ville"],
+            },
+          ],
+        },
+      ],
+    });
+
+    const periodMap = {};
+    const clientMap = {};
+    const uniqueBLIds = new Set();
+
+    allBLLineItems.forEach((item) => {
+      const qty = parseFloat(item.quantite) || 0;
+      const revenue = parseFloat(item.total_ligne) || 0;
+      const metreLineaire = calculateMetreLin(item.quantite, item.v1, item.v2);
+      const bl = item.bonLivraison;
+      if (!bl) return;
+
+      uniqueBLIds.add(bl.id);
+
+      const { key: periodKey, label: periodLabel } = getPeriodInfo(
+        bl.issueDate,
+        periodGroupBy,
+      );
+
+      if (!periodMap[periodKey]) {
+        periodMap[periodKey] = {
+          period: periodKey,
+          label: periodLabel,
+          quantity: 0,
+          metreLineaire: 0,
+          revenue: 0,
+          blIds: new Set(),
+        };
+      }
+      periodMap[periodKey].quantity += qty;
+      periodMap[periodKey].metreLineaire += metreLineaire;
+      periodMap[periodKey].revenue += revenue;
+      periodMap[periodKey].blIds.add(bl.id);
+
+      const client = bl.client;
+      if (client) {
+        if (!clientMap[client.id]) {
+          clientMap[client.id] = {
+            id: client.id,
+            nom_complete: client.nom_complete,
+            telephone: client.telephone,
+            ville: client.ville,
+            quantity: 0,
+            metreLineaire: 0,
+            revenue: 0,
+            blIds: new Set(),
+          };
+        }
+        clientMap[client.id].quantity += qty;
+        clientMap[client.id].metreLineaire += metreLineaire;
+        clientMap[client.id].revenue += revenue;
+        clientMap[client.id].blIds.add(bl.id);
+      }
+    });
+
+    const salesByPeriod = Object.values(periodMap)
+      .map((entry) => ({
+        period: entry.period,
+        label: entry.label,
+        quantity: parseFloat(entry.quantity.toFixed(2)),
+        metreLineaire: parseFloat(entry.metreLineaire.toFixed(2)),
+        revenue: parseFloat(entry.revenue.toFixed(2)),
+        blCount: entry.blIds.size,
+      }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+
+    const salesByClient = Object.values(clientMap)
+      .map((entry) => ({
+        id: entry.id,
+        nom_complete: entry.nom_complete,
+        telephone: entry.telephone,
+        ville: entry.ville,
+        quantity: parseFloat(entry.quantity.toFixed(2)),
+        metreLineaire: parseFloat(entry.metreLineaire.toFixed(2)),
+        revenue: parseFloat(entry.revenue.toFixed(2)),
+        blCount: entry.blIds.size,
+      }))
+      .sort((a, b) => b.metreLineaire - a.metreLineaire);
+
+    const topClientsByMetreLin = salesByClient.slice(0, 10);
+
+    const totalMetreLineaire = salesByClient.reduce(
+      (sum, entry) => sum + entry.metreLineaire,
+      0,
     );
 
     const stats = {
-      totalDevisItems,
-      totalBLItems,
-      totalFactureItems,
-      totalDocuments: totalDevisItems + totalBLItems + totalFactureItems,
-      totalQuantity: {
-        devis: devisQtyResult || 0,
-        bonLivraisons: blQtyResult || 0,
-        factures: factureQtyResult || 0,
-        total: (devisQtyResult || 0) + (blQtyResult || 0) + (factureQtyResult || 0),
-      },
-      totalRevenue: {
-        devis: parseFloat(devisTotalResult || 0),
-        bonLivraisons: parseFloat(blTotalResult || 0),
-        factures: parseFloat(factureTotalResult || 0),
-        total:
-          parseFloat(devisTotalResult || 0) +
-          parseFloat(blTotalResult || 0) +
-          parseFloat(factureTotalResult || 0),
-      },
-      uniqueClientsCount: uniqueClients.length,
+      totalBLItems: filteredBLItems,
+      totalDocuments: filteredBLItems,
+      totalQuantity: parseFloat(Number(filteredBLQty || 0).toFixed(2)),
+      totalMetreLineaire: parseFloat(totalMetreLineaire.toFixed(2)),
+      totalRevenue: parseFloat(filteredBLRevenue || 0),
+      uniqueClientsCount: salesByClient.length,
+      uniqueBLCount: uniqueBLIds.size,
+    };
+
+    const chartData = {
+      groupBy: periodGroupBy,
+      salesByPeriod,
+      salesByMonth: salesByPeriod,
+      salesByClient,
+      topClientsByMetreLin,
     };
 
     return res.json({
@@ -1198,7 +1311,8 @@ const getProductHistory = async (req, res) => {
         ...produit.toJSON(),
         statistics: stats,
       },
-      clients: uniqueClients,
+      clients: salesByClient,
+      chartData,
       documents: {
         byType: {
           devis,
@@ -1214,8 +1328,9 @@ const getProductHistory = async (req, res) => {
       },
       filters: {
         documentType,
-        startDate,
-        endDate,
+        groupBy: periodGroupBy,
+        startDate: startDate || "",
+        endDate: endDate || "",
         sortBy,
         sortOrder,
       },
