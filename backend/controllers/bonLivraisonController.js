@@ -494,6 +494,14 @@ const getBonLivraisonsByDate = async (req, res) => {
     });
 
     // Step 4: Calculate the actual amount paid on the filtered date range per BonLivraison
+    // Parse the date boundaries for paymentDate verification
+    const rangeStart = startDate
+      ? new Date(`${startDate}T00:00:00.000Z`).getTime()
+      : null;
+    const rangeEnd = endDate
+      ? new Date(`${endDate}T23:59:59.999Z`).getTime()
+      : null;
+
     const result = bonLivraisons.map((bon) => {
       const bonJson = bon.toJSON();
 
@@ -508,14 +516,19 @@ const getBonLivraisonsByDate = async (req, res) => {
 
       if (filteredAdvancementTotal > 0) {
         // ✅ If there are advancements in the filtered date range, use their sum
-        // This covers partial payments made on this date
         paidOnDate = filteredAdvancementTotal;
       } else if (bonJson.paymentDate) {
-        // ✅ If NO advancements in the filtered range but bon has paymentDate set
-        // (which means it was fully paid in one transaction on that date), use total
-        paidOnDate = parseFloat(bonJson.total || 0);
+        // ✅ Only count paymentDate if it actually falls within the requested range
+        const paymentTime = new Date(bonJson.paymentDate).getTime();
+        const inRange =
+          (!rangeStart || paymentTime >= rangeStart) &&
+          (!rangeEnd || paymentTime <= rangeEnd);
+
+        if (inRange) {
+          paidOnDate = parseFloat(bonJson.total || 0);
+        }
       }
-      // ✅ If no advancements and no paymentDate → paidOnDate remains 0
+      // ✅ If no advancements and paymentDate is outside range → paidOnDate remains 0
 
       return {
         ...bonJson,
