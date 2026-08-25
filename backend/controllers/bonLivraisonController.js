@@ -3,6 +3,10 @@ const BonLivraisonProduit = require("../models/BonLivraisonProduit"); // Make su
 const Advancement = require("../models/Advancement");
 const { Op } = require("sequelize");
 const { Client, Produit, User } = require("../models");
+const {
+  buildLocalDateFilter,
+  isDateInLocalRange,
+} = require("../utils/dateUtils");
 
 const generateDeliveryNumber = async () => {
   const prefix = "BL";
@@ -346,10 +350,8 @@ const getBonLivraisons = async (req, res) => {
       if (!endDate) endDate = now.toISOString().split("T")[0];
     }
 
-    // Build date filter
-    const dateFilter = {};
-    if (startDate) dateFilter[Op.gte] = new Date(`${startDate}T00:00:00.000Z`);
-    if (endDate) dateFilter[Op.lte] = new Date(`${endDate}T23:59:59.999Z`);
+    // Build date filter (Morocco local calendar days, not UTC midnight)
+    const dateFilter = buildLocalDateFilter(startDate, endDate);
 
     // Step 1: Find all bon_livraison_id from advancements in the date range
     const advancementMatches = await Advancement.findAll({
@@ -424,14 +426,10 @@ const getBonLivraisonsByDate = async (req, res) => {
     let advancementWhereCondition = {};
 
     if (startDate || endDate) {
-      const dateFilter = {};
-
-      if (startDate) {
-        dateFilter[Op.gte] = new Date(`${startDate}T00:00:00.000Z`);
-      }
-      if (endDate) {
-        dateFilter[Op.lte] = new Date(`${endDate}T23:59:59.999Z`);
-      }
+      const dateFilter = buildLocalDateFilter(
+        startDate || endDate,
+        endDate || startDate,
+      );
 
       // Step 1: Find all bon_livraison_id from advancements in the date range
       const advancementMatches = await Advancement.findAll({
@@ -494,41 +492,32 @@ const getBonLivraisonsByDate = async (req, res) => {
     });
 
     // Step 4: Calculate the actual amount paid on the filtered date range per BonLivraison
-    // Parse the date boundaries for paymentDate verification
-    const rangeStart = startDate
-      ? new Date(`${startDate}T00:00:00.000Z`).getTime()
-      : null;
-    const rangeEnd = endDate
-      ? new Date(`${endDate}T23:59:59.999Z`).getTime()
-      : null;
-
     const result = bonLivraisons.map((bon) => {
       const bonJson = bon.toJSON();
+      const advancements = bonJson.advancements || [];
 
       // Sum only the advancements that matched the date filter
-      const filteredAdvancementTotal = bonJson.advancements.reduce(
+      const filteredAdvancementTotal = advancements.reduce(
         (sum, adv) => sum + parseFloat(adv.amount || 0),
         0,
       );
 
-      // Determine the amount paid on this specific date range
+      // Amount actually collected on the selected date(s) only
       let paidOnDate = 0;
 
       if (filteredAdvancementTotal > 0) {
-        // ✅ If there are advancements in the filtered date range, use their sum
         paidOnDate = filteredAdvancementTotal;
-      } else if (bonJson.paymentDate) {
-        // ✅ Only count paymentDate if it actually falls within the requested range
-        const paymentTime = new Date(bonJson.paymentDate).getTime();
-        const inRange =
-          (!rangeStart || paymentTime >= rangeStart) &&
-          (!rangeEnd || paymentTime <= rangeEnd);
-
-        if (inRange) {
-          paidOnDate = parseFloat(bonJson.total || 0);
-        }
+      } else if (
+        bonJson.paymentDate &&
+        isDateInLocalRange(
+          bonJson.paymentDate,
+          startDate || endDate,
+          endDate || startDate,
+        )
+      ) {
+        // Full payment in one transaction on this date (no advancement rows)
+        paidOnDate = parseFloat(bonJson.total || 0);
       }
-      // ✅ If no advancements and paymentDate is outside range → paidOnDate remains 0
 
       return {
         ...bonJson,
