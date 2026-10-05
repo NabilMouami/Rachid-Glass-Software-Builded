@@ -111,16 +111,22 @@ const createBonLivraison = async (req, res) => {
         totalPrice: item.totalPrice,
       });
 
+      const quantity = parseFloat(item.quantity);
+
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error(`Quantity must be a positive number for item ${index + 1}`);
+      }
+
       // Use field names that match your BonLivraisonProduit model
       return {
         produit_id: item.productId, // This must match the foreign key name in BonLivraisonProduit
-        quantite: item.quantity,
-        v1: item.v1 || 1,
-        v2: item.v2 || 1,
-        prix_unitaire: item.unitPrice,
-        total_ligne: item.totalPrice || 0,
+        quantite: quantity,
+        v1: parseFloat(item.v1) || 1,
+        v2: parseFloat(item.v2) || 1,
+        prix_unitaire: parseFloat(item.unitPrice) || 0,
+        total_ligne: parseFloat(item.totalPrice) || 0,
         remise_ligne: 0,
-        deliveredQuantity: item.deliveredQuantity || 0,
+        deliveredQuantity: parseFloat(item.deliveredQuantity) || 0,
       };
     });
 
@@ -391,6 +397,7 @@ const getBonLivraisons = async (req, res) => {
         "advancement",
         "remainingAmount",
         "status",
+        "paymentType",
         "createdAt",
       ],
       include: [
@@ -630,11 +637,11 @@ const updateBonLivraison = async (req, res) => {
       console.log("🧮 Preparing items for update...");
 
       for (const item of items) {
-        if (!item.quantite || parseFloat(item.quantite) <= 0) {
+        if (!Number.isFinite(parseFloat(item.quantite)) || parseFloat(item.quantite) <= 0) {
           console.log("❌ Validation failed: Quantity must be positive");
           await transaction.rollback();
           return res.status(400).json({
-            message: "Quantity must be positive for all items",
+            message: "Quantity must be a positive number for all items",
           });
         }
       }

@@ -41,6 +41,16 @@ const getMondayOfWeek = (date) => {
 
 const getPeriodInfo = (date, groupBy = "week") => {
   const d = new Date(date);
+  if (groupBy === "day") {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const label = d.toLocaleDateString("fr-FR", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    return { key, label };
+  }
+
   if (groupBy === "month") {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const label = d.toLocaleDateString("fr-FR", {
@@ -48,6 +58,11 @@ const getPeriodInfo = (date, groupBy = "week") => {
       year: "numeric",
     });
     return { key, label };
+  }
+
+  if (groupBy === "year") {
+    const key = String(d.getFullYear());
+    return { key, label: key };
   }
 
   const monday = getMondayOfWeek(d);
@@ -961,7 +976,8 @@ const getProductHistory = async (req, res) => {
     // Build date filter (inclusive full days, local time)
     const dateFilter = buildProductDateFilter(startDate, endDate);
     const hasDateFilter = !!(startDate || endDate);
-    const periodGroupBy = groupBy === "month" ? "month" : "week";
+    const supportedGroups = ["day", "week", "month", "year"];
+    const periodGroupBy = supportedGroups.includes(groupBy) ? groupBy : "week";
     const filteredBlIds = await getFilteredBonLivraisonIds(startDate, endDate);
     const blProductWhere = buildBlProduitWhere(id, filteredBlIds);
 

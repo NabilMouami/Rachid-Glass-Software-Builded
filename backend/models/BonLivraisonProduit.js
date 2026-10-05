@@ -12,7 +12,7 @@ const BonLivraisonProduit = sequelize.define(
     },
 
     quantite: {
-      type: DataTypes.DECIMAL(10, 2),
+      type: DataTypes.FLOAT,
       allowNull: false,
       defaultValue: 1,
     },
@@ -40,7 +40,7 @@ const BonLivraisonProduit = sequelize.define(
       allowNull: false,
     },
     deliveredQuantity: {
-      type: DataTypes.DECIMAL(10, 2),
+      type: DataTypes.FLOAT,
       defaultValue: 0,
       comment: "Quantity actually delivered",
     },
